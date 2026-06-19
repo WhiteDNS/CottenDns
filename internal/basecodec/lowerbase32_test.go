@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -13,7 +13,7 @@ import (
 )
 
 func TestEncodeLowerBase32UsesOnlyLowerBase32Alphabet(t *testing.T) {
-	encoded := EncodeLowerBase32([]byte("StormDNS-123"))
+	encoded := EncodeLowerBase32([]byte("CottenpickDNS-123"))
 	if encoded == "" {
 		t.Fatal("encoded string must not be empty")
 	}

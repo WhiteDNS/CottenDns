@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -20,8 +20,8 @@ import (
 
 	"golang.org/x/crypto/chacha20"
 
-	baseCodec "stormdns-go/internal/basecodec"
-	"stormdns-go/internal/config"
+	baseCodec "cottenpickdns-go/internal/basecodec"
+	"cottenpickdns-go/internal/config"
 )
 
 var (
@@ -65,6 +65,36 @@ type Codec struct {
 
 func NewCodecFromConfig(cfg config.ServerConfig, rawKey string) (*Codec, error) {
 	return NewCodec(cfg.DataEncryptionMethod, rawKey)
+}
+
+// AllMethods lists every supported encryption method id, in ascending order.
+var AllMethods = []int{0, 1, 2, 3, 4, 5}
+
+// IsAuthenticatedMethod reports whether the method provides authenticated
+// encryption (AEAD). Only AES-GCM (methods 3, 4, 5) authenticate: a wrong key or
+// method makes Open fail cleanly. None/XOR/ChaCha20 (0, 1, 2) are unauthenticated,
+// so a wrong-method "decrypt" silently yields garbage. This distinction drives
+// the server's auto-detect trial order — AEAD methods are tried first so an
+// authenticated frame can never be mis-claimed by an unauthenticated codec.
+func IsAuthenticatedMethod(method int) bool {
+	return method >= 3 && method <= 5
+}
+
+// NewCodecSet builds one Codec per method id, all derived from the same raw key.
+// It is used for server-side encryption-method auto-detection: because the whole
+// upstream frame is encrypted, the server cannot know which method the client
+// used without trying to decrypt, so it keeps a codec for each candidate method.
+// The shared secret is the raw key string; deriveKey adapts it per method.
+func NewCodecSet(methods []int, rawKey string) ([]*Codec, error) {
+	set := make([]*Codec, 0, len(methods))
+	for _, m := range methods {
+		codec, err := NewCodec(m, rawKey)
+		if err != nil {
+			return nil, err
+		}
+		set = append(set, codec)
+	}
+	return set, nil
 }
 
 func NewCodec(method int, rawKey string) (*Codec, error) {

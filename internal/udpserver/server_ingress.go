@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -12,10 +12,10 @@ import (
 	"fmt"
 	"time"
 
-	DnsParser "stormdns-go/internal/dnsparser"
-	domainMatcher "stormdns-go/internal/domainmatcher"
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	domainMatcher "cottenpickdns-go/internal/domainmatcher"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 func (s *Server) handlePacket(packet []byte) []byte {
@@ -50,7 +50,12 @@ func (s *Server) handlePacket(packet []byte) []byte {
 }
 
 func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision) []byte {
-	vpnPacket, err := VpnProto.ParseInflatedFromLabels(decision.Labels, s.codec)
+	// Encryption-method auto-detection: the upstream frame is fully encrypted, so
+	// the client's method is discovered by trying each candidate codec. s.codecs
+	// is pre-ordered AEAD-first (see SetCodecSet), so iterating from index 0 tries
+	// authenticated methods before any unauthenticated one and costs a single
+	// attempt for the common single-method deployment.
+	vpnPacket, _, err := VpnProto.ParseInflatedFromLabelsAny(decision.Labels, s.codecs, 0)
 	if err != nil {
 		if errors.Is(err, VpnProto.ErrInvalidFragmentInfo) {
 			s.fragmentInvalidHeader.Add(1)

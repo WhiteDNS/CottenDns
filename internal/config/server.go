@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -20,7 +20,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"stormdns-go/internal/compression"
+	"cottenpickdns-go/internal/compression"
 )
 
 type ServerConfig struct {
@@ -75,6 +75,7 @@ type ServerConfig struct {
 	SupportedUploadCompressionTypes   []int    `toml:"SUPPORTED_UPLOAD_COMPRESSION_TYPES"`
 	SupportedDownloadCompressionTypes []int    `toml:"SUPPORTED_DOWNLOAD_COMPRESSION_TYPES"`
 	DataEncryptionMethod              int      `toml:"DATA_ENCRYPTION_METHOD"`
+	EncryptionAutoDetect              bool     `toml:"ENCRYPTION_AUTO_DETECT"`
 	EncryptionKeyFile                 string   `toml:"ENCRYPTION_KEY_FILE"`
 	LogLevel                          string   `toml:"LOG_LEVEL"`
 	ARQWindowSize                     int      `toml:"ARQ_WINDOW_SIZE"`
@@ -159,6 +160,7 @@ func defaultServerConfig() ServerConfig {
 		SupportedUploadCompressionTypes:   []int{0, 3},
 		SupportedDownloadCompressionTypes: []int{0, 3},
 		DataEncryptionMethod:              1,
+		EncryptionAutoDetect:              true,
 		EncryptionKeyFile:                 "encrypt_key.txt",
 		LogLevel:                          "INFO",
 		ARQWindowSize:                     2000,

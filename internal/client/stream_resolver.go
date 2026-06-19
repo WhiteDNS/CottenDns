@@ -3,8 +3,8 @@ package client
 import (
 	"time"
 
-	"stormdns-go/internal/arq"
-	Enums "stormdns-go/internal/enums"
+	"cottenpickdns-go/internal/arq"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 // directionalDuplicationCounts returns the effective upload/download and
@@ -112,6 +112,17 @@ func (c *Client) selectTargetConnectionsForPacket(packetType uint8, streamID uin
 	selected := make([]Connection, 0, targetCount)
 	selected = append(selected, preferred)
 
+	// A6: when enabled, fill the remaining duplicate slots preferring connections
+	// on tunnel domains not yet represented, so duplicates take independent paths.
+	if c.dupPreferDistinctDomains {
+		selected = c.appendDomainDiverseDuplicates(selected, targetCount)
+		if len(selected) == 0 {
+			return nil, ErrNoValidConnections
+		}
+		c.cacheStreamConnectionPlan(stream, preferred.Key, targetCount, selected)
+		return selected, nil
+	}
+
 	for _, connection := range c.balancer.GetUniqueConnections(targetCount) {
 		if !connection.IsValid || connection.Key == "" {
 			continue
@@ -138,6 +149,58 @@ func (c *Client) selectTargetConnectionsForPacket(packetType uint8, streamID uin
 
 	c.cacheStreamConnectionPlan(stream, preferred.Key, targetCount, selected)
 	return selected, nil
+}
+
+// appendDomainDiverseDuplicates fills selected up to targetCount, biasing toward
+// connections whose tunnel domain is not yet represented (A6). It pulls the full
+// valid candidate pool (in balancer-strategy order) and makes two passes: first
+// adding only connections that introduce a new domain, then filling any leftover
+// slots with remaining unique connections. This never under-fills relative to
+// the resolver-only selection — it only reorders preference toward distinct
+// domains. Connections are deduplicated by Key, as before.
+func (c *Client) appendDomainDiverseDuplicates(selected []Connection, targetCount int) []Connection {
+	if len(selected) >= targetCount || c.balancer == nil {
+		return selected
+	}
+
+	poolSize := c.balancer.ValidCount()
+	if poolSize < targetCount {
+		poolSize = targetCount
+	}
+	pool := c.balancer.GetUniqueConnections(poolSize)
+
+	seenKey := make(map[string]struct{}, targetCount)
+	seenDomain := make(map[string]struct{}, targetCount)
+	for _, s := range selected {
+		seenKey[s.Key] = struct{}{}
+		seenDomain[s.Domain] = struct{}{}
+	}
+
+	fill := func(requireNewDomain bool) {
+		for _, conn := range pool {
+			if len(selected) >= targetCount {
+				return
+			}
+			if !conn.IsValid || conn.Key == "" {
+				continue
+			}
+			if _, dup := seenKey[conn.Key]; dup {
+				continue
+			}
+			if requireNewDomain {
+				if _, seen := seenDomain[conn.Domain]; seen {
+					continue
+				}
+			}
+			selected = append(selected, conn)
+			seenKey[conn.Key] = struct{}{}
+			seenDomain[conn.Domain] = struct{}{}
+		}
+	}
+
+	fill(true)  // prefer connections on new domains
+	fill(false) // then top up with any remaining unique connections
+	return selected
 }
 
 func (c *Client) selectUniqueRuntimeConnections(requiredCount int) ([]Connection, error) {

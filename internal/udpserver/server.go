@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"stormdns-go/internal/config"
-	dnsCache "stormdns-go/internal/dnscache"
-	domainMatcher "stormdns-go/internal/domainmatcher"
-	fragmentStore "stormdns-go/internal/fragmentstore"
-	"stormdns-go/internal/logger"
-	"stormdns-go/internal/security"
+	"cottenpickdns-go/internal/config"
+	dnsCache "cottenpickdns-go/internal/dnscache"
+	domainMatcher "cottenpickdns-go/internal/domainmatcher"
+	fragmentStore "cottenpickdns-go/internal/fragmentstore"
+	"cottenpickdns-go/internal/logger"
+	"cottenpickdns-go/internal/security"
 )
 
 const (
@@ -41,6 +41,8 @@ type Server struct {
 	cfg                      config.ServerConfig
 	log                      *logger.Logger
 	codec                    *security.Codec
+	codecs                   []*security.Codec // candidate codecs for encryption-method auto-detect
+	preferredCodec           atomic.Int32      // index into codecs to try first
 	domainMatcher            *domainMatcher.Matcher
 	sessions                 *sessionStore
 	deferredDNSSession       *deferredSessionProcessor
@@ -167,6 +169,7 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 		cfg:                    cfg,
 		log:                    log,
 		codec:                  codec,
+		codecs:                 []*security.Codec{codec}, // single-codec until SetCodecSet enables auto-detect
 		domainMatcher:          domainMatcher.New(cfg.Domain, cfg.MinVPNLabelLength),
 		sessions:               newSessionStore(cfg.SessionOrphanQueueInitialCap, cfg.StreamQueueInitialCapacity, cfg.SessionInitReuseTTL(), cfg.RecentlyClosedStreamTTL(), cfg.RecentlyClosedStreamCap, cfg.MaxStreamsPerSession),
 		deferredDNSSession:     newDeferredSessionProcessor(dnsDeferredWorkers, dnsDeferredQueue, log),
@@ -214,6 +217,57 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 			},
 		},
 	}
+}
+
+// SetCodecSet enables encryption-method auto-detection by giving the server a
+// codec per candidate method (all derived from the same shared key). The codecs
+// are reordered into the trial order used at ingress: authenticated (AEAD)
+// methods first — so an authenticated frame is never mis-decrypted by an
+// unauthenticated codec — with the configured method placed first within its
+// own class so the common single-method deployment costs one decrypt attempt.
+// Passing a set with a single codec leaves the server behaving exactly as
+// before. Call once during startup. preferred is the index of the configured
+// method within the supplied slice.
+func (s *Server) SetCodecSet(codecs []*security.Codec, preferred int) {
+	if s == nil || len(codecs) == 0 {
+		return
+	}
+
+	var preferredCodec *security.Codec
+	if preferred >= 0 && preferred < len(codecs) {
+		preferredCodec = codecs[preferred]
+	}
+
+	var aead, other []*security.Codec
+	for i, codec := range codecs {
+		if codec == nil || i == preferred {
+			continue
+		}
+		if security.IsAuthenticatedMethod(codec.Method()) {
+			aead = append(aead, codec)
+		} else {
+			other = append(other, codec)
+		}
+	}
+
+	ordered := make([]*security.Codec, 0, len(codecs))
+	switch {
+	case preferredCodec != nil && security.IsAuthenticatedMethod(preferredCodec.Method()):
+		ordered = append(ordered, preferredCodec) // preferred AEAD first
+		ordered = append(ordered, aead...)
+		ordered = append(ordered, other...)
+	case preferredCodec != nil:
+		ordered = append(ordered, aead...) // AEAD still ahead of any unauthenticated
+		ordered = append(ordered, preferredCodec)
+		ordered = append(ordered, other...)
+	default:
+		ordered = append(ordered, aead...)
+		ordered = append(ordered, other...)
+	}
+
+	s.codecs = ordered
+	s.codec = ordered[0]
+	s.preferredCodec.Store(0)
 }
 
 type throttledLogState struct {

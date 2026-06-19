@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 package main
@@ -17,12 +17,12 @@ import (
 	"strings"
 	"syscall"
 
-	"stormdns-go/internal/config"
-	"stormdns-go/internal/logger"
-	"stormdns-go/internal/runtimepath"
-	"stormdns-go/internal/security"
-	UDPServer "stormdns-go/internal/udpserver"
-	"stormdns-go/internal/version"
+	"cottenpickdns-go/internal/config"
+	"cottenpickdns-go/internal/logger"
+	"cottenpickdns-go/internal/runtimepath"
+	"cottenpickdns-go/internal/security"
+	UDPServer "cottenpickdns-go/internal/udpserver"
+	"cottenpickdns-go/internal/version"
 )
 
 func waitForExitInput() {
@@ -43,7 +43,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("StormDNS Server Version: %s\n", version.GetVersion())
+		fmt.Printf("CottenpickDNS Server Version: %s\n", version.GetVersion())
 		return
 	}
 
@@ -58,18 +58,18 @@ func main() {
 
 	var log *logger.Logger
 	if *logPath != "" {
-		log = logger.NewWithFile("StormDNS Server", cfg.LogLevel, *logPath)
+		log = logger.NewWithFile("CottenpickDNS Server", cfg.LogLevel, *logPath)
 	} else {
-		log = logger.New("StormDNS Server", cfg.LogLevel)
+		log = logger.New("CottenpickDNS Server", cfg.LogLevel)
 	}
 
 	log.Infof("============================================================")
-	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/nullroute1970/StormDNS</yellow>")
+	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
 	log.Infof("<cyan>Telegram:</cyan> <yellow>@nulllroute1970</yellow>")
 	log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	log.Infof("============================================================")
 
-	log.Infof("\U0001F680 <magenta>StormDNS Server starting ...</magenta>")
+	log.Infof("\U0001F680 <magenta>CottenpickDNS Server starting ...</magenta>")
 
 	keyInfo, err := security.EnsureServerEncryptionKey(cfg)
 	if err != nil {
@@ -86,6 +86,27 @@ func main() {
 	}
 
 	srv := UDPServer.New(cfg, log, codec)
+
+	// Encryption-method auto-detection: build a codec per method from the shared
+	// key so the server adapts to whatever method the client uses, with the
+	// configured method tried first. Disabled by ENCRYPTION_AUTO_DETECT=false.
+	if cfg.EncryptionAutoDetect {
+		codecSet, setErr := security.NewCodecSet(security.AllMethods, keyInfo.Key)
+		if setErr != nil {
+			log.Errorf("❌ <red>Encryption Codec Set Setup Failed</red> <magenta>|</magenta> <cyan>%v</cyan>", setErr)
+			waitForExitInput()
+			os.Exit(1)
+		}
+		preferred := 0
+		for i, m := range security.AllMethods {
+			if m == cfg.DataEncryptionMethod {
+				preferred = i
+				break
+			}
+		}
+		srv.SetCodecSet(codecSet, preferred)
+		log.Infof("\U0001F513 <green>Encryption Auto-Detect: <cyan>enabled</cyan> <gray>(%d methods, default tried first)</gray></green>", len(codecSet))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

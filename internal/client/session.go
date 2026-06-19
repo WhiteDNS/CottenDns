@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (session.go) handles session states and initialization requests.
 // ==============================================================================
 package client
@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"stormdns-go/internal/compression"
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/compression"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 var (

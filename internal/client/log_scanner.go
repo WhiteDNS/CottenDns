@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (log_scanner.go) scans resolver cache log files written by previous
 // sessions and returns a ranked list of working resolvers so that the next
 // session can skip the full MTU scan and start immediately.

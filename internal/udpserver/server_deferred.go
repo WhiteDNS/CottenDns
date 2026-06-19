@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	Enums "stormdns-go/internal/enums"
-	SocksProto "stormdns-go/internal/socksproto"
-	VpnProto "stormdns-go/internal/vpnproto"
+	Enums "cottenpickdns-go/internal/enums"
+	SocksProto "cottenpickdns-go/internal/socksproto"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 const maxDeferredConnectAttemptTimeout = 15 * time.Second

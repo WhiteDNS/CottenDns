@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/mlq"
+	"cottenpickdns-go/internal/mlq"
 )
 
 func TestAsyncStreamDispatcherDrainsQueuedWorkAfterSingleWake(t *testing.T) {

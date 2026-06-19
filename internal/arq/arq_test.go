@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	Enums "stormdns-go/internal/enums"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 // MockPacketEnqueuer captures packets sent by ARQ

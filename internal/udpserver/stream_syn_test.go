@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/config"
-	Enums "stormdns-go/internal/enums"
-	fragmentStore "stormdns-go/internal/fragmentstore"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/config"
+	Enums "cottenpickdns-go/internal/enums"
+	fragmentStore "cottenpickdns-go/internal/fragmentstore"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 // testNetConn is a minimal net.Conn fake. closed is atomic so tests that race

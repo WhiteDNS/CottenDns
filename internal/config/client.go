@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -20,7 +20,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"stormdns-go/internal/compression"
+	"cottenpickdns-go/internal/compression"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 type ClientConfig struct {
@@ -135,6 +136,19 @@ type ClientConfig struct {
 	ARQTerminalAckWaitTimeoutSec          float64           `toml:"ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS"`
 	Resolvers                             []ResolverAddress `toml:"-"`
 	ResolverMap                           map[string]int    `toml:"-"`
+	// QUERY_TYPES is the set of DNS record types the client rotates over when
+	// building tunnel queries (A1, DPI-resistance). Names are case-insensitive,
+	// e.g. ["TXT", "CNAME", "A", "AAAA"]. Empty / unset preserves the historical
+	// behavior of TXT-only. Unknown names are rejected at load time.
+	QueryTypes []string `toml:"QUERY_TYPES"`
+	// QueryTypeCodes is the validated numeric form of QueryTypes, always
+	// non-empty after finalizeClientConfig (defaults to [TXT]).
+	QueryTypeCodes []uint16 `toml:"-"`
+	// DUPLICATION_PREFER_DISTINCT_DOMAINS biases packet duplication (A6) so the
+	// duplicate copies of a packet traverse distinct tunnel domains where
+	// possible, for independent-path delivery on lossy links and signature
+	// spread. Default false preserves the historical resolver-only selection.
+	DuplicationPreferDistinctDomains bool `toml:"DUPLICATION_PREFER_DISTINCT_DOMAINS"`
 }
 
 type ClientConfigOverrides struct {
@@ -228,7 +242,7 @@ func defaultClientConfig() ClientConfig {
 		LogLevel:                              "INFO",
 		LogToFile:                             true,
 		LogDir:                                "logs",
-		LogFileName:                           "stormdns_{time}.log",
+		LogFileName:                           "cottenpickdns_{time}.log",
 		StatsReportIntervalSeconds:            5.0,
 		StartupMode:                           "logs",
 		LogScanMaxDays:                        30,
@@ -356,6 +370,12 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	if cfg.DataEncryptionMethod < 0 || cfg.DataEncryptionMethod > 5 {
 		return cfg, fmt.Errorf("invalid DATA_ENCRYPTION_METHOD: %d", cfg.DataEncryptionMethod)
 	}
+
+	queryTypeCodes, err := normalizeQueryTypes(cfg.QueryTypes)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.QueryTypeCodes = queryTypeCodes
 
 	cfg.ListenIP = defaultString(strings.TrimSpace(cfg.ListenIP), "127.0.0.1")
 
@@ -494,7 +514,7 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	}
 	cfg.LogFileName = strings.TrimSpace(cfg.LogFileName)
 	if cfg.LogFileName == "" {
-		cfg.LogFileName = "stormdns_{time}.log"
+		cfg.LogFileName = "cottenpickdns_{time}.log"
 	}
 	cfg.StartupMode = strings.ToLower(strings.TrimSpace(cfg.StartupMode))
 	switch cfg.StartupMode {
@@ -551,6 +571,40 @@ func (c ClientConfig) ResolversPath() string {
 
 func (c ClientConfig) LocalDNSCachePath() string {
 	return filepath.Join(c.ConfigDir, "local_dns_cache.bin")
+}
+
+// normalizeQueryTypes validates the configured QUERY_TYPES names and returns
+// their numeric qTypes, preserving order and dropping duplicates. An empty or
+// unset list defaults to TXT-only (the historical behavior). An unrecognized
+// name is a hard error so misconfiguration is caught at startup rather than
+// silently degrading the tunnel.
+func normalizeQueryTypes(names []string) ([]uint16, error) {
+	if len(names) == 0 {
+		return []uint16{Enums.DNS_RECORD_TYPE_TXT}, nil
+	}
+
+	codes := make([]uint16, 0, len(names))
+	seen := make(map[uint16]struct{}, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		code, ok := Enums.DNSRecordTypeFromName(trimmed)
+		if !ok {
+			return nil, fmt.Errorf("invalid QUERY_TYPES entry: %q", name)
+		}
+		if _, dup := seen[code]; dup {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+
+	if len(codes) == 0 {
+		return []uint16{Enums.DNS_RECORD_TYPE_TXT}, nil
+	}
+	return codes, nil
 }
 
 func normalizeClientDomains(domains []string) []string {
@@ -700,7 +754,7 @@ func (c ClientConfig) ResolvedLogFilePath() string {
 	}
 	name := c.LogFileName
 	if name == "" {
-		name = "stormdns_{time}.log"
+		name = "cottenpickdns_{time}.log"
 	}
 	if strings.Contains(name, "{time}") {
 		ts := time.Now().Format("20060102_150405")

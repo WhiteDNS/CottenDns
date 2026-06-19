@@ -300,7 +300,7 @@ jobs:
           CC: ${{ env.CC }}
           CXX: ${{ env.CXX }}
         run: |
-          go build -trimpath -ldflags "-s -w -X stormdns-go/internal/version.BuildVersion=${{ needs.preflight.outputs.release_tag }}" -o dist/StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }} ./cmd/client
+          go build -trimpath -ldflags "-s -w -X cottenpickdns-go/internal/version.BuildVersion=${{ needs.preflight.outputs.release_tag }}" -o dist/CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }} ./cmd/client
 
       - name: Build server
         env:
@@ -313,15 +313,15 @@ jobs:
           CC: ${{ env.CC }}
           CXX: ${{ env.CXX }}
         run: |
-          go build -trimpath -ldflags "-s -w -X stormdns-go/internal/version.BuildVersion=${{ needs.preflight.outputs.release_tag }}" -o dist/StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }} ./cmd/server
+          go build -trimpath -ldflags "-s -w -X cottenpickdns-go/internal/version.BuildVersion=${{ needs.preflight.outputs.release_tag }}" -o dist/CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }} ./cmd/server
 
       - name: Verify Linux-Legacy binaries are not dynamically linked
         if: ${{ matrix.platform == 'Linux-Legacy' }}
         shell: bash
         run: |
           set -euo pipefail
-          client_bin="dist/StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
-          server_bin="dist/StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          client_bin="dist/CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          server_bin="dist/CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
           for bin in "$client_bin" "$server_bin"; do
             echo "Inspecting $bin"
@@ -371,8 +371,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-Location dist
 
-          $clientBin = "StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
-          $serverBin = "StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          $clientBin = "CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          $serverBin = "CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
           # Client Test
           Write-Host "Smoke testing $clientBin ..."
@@ -409,8 +409,8 @@ jobs:
           set -euo pipefail
           cd dist
 
-          client_bin="StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
-          server_bin="StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          client_bin="CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          server_bin="CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
           for bin in "$client_bin" "$server_bin"; do
             if [ ! -f "$bin" ]; then
@@ -498,8 +498,8 @@ jobs:
           """
 
           docs = [
-              ("README.MD", "StormDNS Documentation", "README.html"),
-              ("README_FA.MD", "StormDNS Documentation (FA)", "README_FA.html"),
+              ("README.MD", "CottenpickDNS Documentation", "README.html"),
+              ("README_FA.MD", "CottenpickDNS Documentation (FA)", "README_FA.html"),
           ]
 
           dist = Path("dist")
@@ -549,14 +549,14 @@ jobs:
           $tag = '${{ needs.preflight.outputs.release_tag }}'
           $archUpper = $arch.ToUpper()
 
-          $clientZipBase = "StormDNS_Client_${platform}_$archUpper"
-          $serverZipBase = "StormDNS_Server_${platform}_$archUpper"
+          $clientZipBase = "CottenpickDNS_Client_${platform}_$archUpper"
+          $serverZipBase = "CottenpickDNS_Server_${platform}_$archUpper"
 
           $clientExeName = "${clientZipBase}_${tag}${ext}"
           $serverExeName = "${serverZipBase}_${tag}${ext}"
 
-          $clientOrig = "StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
-          $serverOrig = "StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          $clientOrig = "CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          $serverOrig = "CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
           if (Test-Path $clientOrig) {
             Rename-Item -Path $clientOrig -NewName $clientExeName -Force
@@ -594,14 +594,14 @@ jobs:
           PLATFORM="${{ matrix.platform }}"
           TAG="${{ needs.preflight.outputs.release_tag }}"
 
-          CLIENT_ZIP_BASE="StormDNS_Client_${PLATFORM}_${ARCH_UPPER}"
-          SERVER_ZIP_BASE="StormDNS_Server_${PLATFORM}_${ARCH_UPPER}"
+          CLIENT_ZIP_BASE="CottenpickDNS_Client_${PLATFORM}_${ARCH_UPPER}"
+          SERVER_ZIP_BASE="CottenpickDNS_Server_${PLATFORM}_${ARCH_UPPER}"
 
           CLIENT_EXE_NAME="${CLIENT_ZIP_BASE}_${TAG}${{ matrix.ext }}"
           SERVER_EXE_NAME="${SERVER_ZIP_BASE}_${TAG}${{ matrix.ext }}"
 
-          CLIENT_ORIG="StormDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
-          SERVER_ORIG="StormDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          CLIENT_ORIG="CottenpickDNS_Client_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
+          SERVER_ORIG="CottenpickDNS_Server_${{ matrix.platform }}_${{ matrix.arch }}${{ matrix.ext }}"
 
           if [ -f "${CLIENT_ORIG}" ]; then
             mv "${CLIENT_ORIG}" "${CLIENT_EXE_NAME}" || true

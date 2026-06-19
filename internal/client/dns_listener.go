@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 package client
@@ -15,12 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"stormdns-go/internal/arq"
-	dnsCache "stormdns-go/internal/dnscache"
-	dnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/netutil"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	dnsCache "cottenpickdns-go/internal/dnscache"
+	dnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/netutil"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 type dnsFragmentKey struct {

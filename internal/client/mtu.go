@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (mtu.go) handles MTU discovery and probing.
 // ==============================================================================
 package client
@@ -17,10 +17,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	DnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/logger"
-	VpnProto "stormdns-go/internal/vpnproto"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/logger"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 var ErrNoValidConnections = errors.New("no valid connections after mtu testing")
@@ -515,7 +515,7 @@ func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probe
 	}
 	rtt := time.Since(startedAt)
 
-	packet, err := DnsParser.ExtractVPNResponse(response, useBase64)
+	packet, err := DnsParser.ExtractVPNResponseMatching(response, useBase64, c.cfg.Domains)
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,
@@ -629,7 +629,7 @@ func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, pro
 	}
 	rtt := time.Since(startedAt)
 
-	packet, err := DnsParser.ExtractVPNResponse(response, useBase64)
+	packet, err := DnsParser.ExtractVPNResponseMatching(response, useBase64, c.cfg.Domains)
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,

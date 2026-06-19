@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -10,8 +10,8 @@ package domainmatcher
 import (
 	"testing"
 
-	DnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 func TestMatcherReturnsNoDataForUnauthorizedDomain(t *testing.T) {
@@ -41,12 +41,32 @@ func TestMatcherReturnsNoDataForExactAllowedDomain(t *testing.T) {
 func TestMatcherReturnsNoDataForUnsupportedType(t *testing.T) {
 	matcher := New([]string{"a.com"}, 3)
 
-	decision := matcher.Match(litePacketWithQuestion("vpn.a.com", Enums.DNS_RECORD_TYPE_A))
+	// DNSKEY is not a tunnel-transport query type, so it must still be rejected.
+	decision := matcher.Match(litePacketWithQuestion("vpn.a.com", Enums.DNS_RECORD_TYPE_DNSKEY))
 	if decision.Action != ActionNoData {
 		t.Fatalf("unexpected action: got=%d want=%d", decision.Action, ActionNoData)
 	}
 	if decision.Reason != "unsupported-qtype" {
 		t.Fatalf("unexpected reason: got=%q", decision.Reason)
+	}
+}
+
+func TestMatcherProcessesRotatedQueryTypes(t *testing.T) {
+	matcher := New([]string{"a.com"}, 3)
+
+	// A1: the rotation set (beyond TXT) must be accepted as tunnel candidates,
+	// since the tunnel payload rides in the QNAME labels regardless of qType.
+	for _, qType := range []uint16{
+		Enums.DNS_RECORD_TYPE_TXT,
+		Enums.DNS_RECORD_TYPE_CNAME,
+		Enums.DNS_RECORD_TYPE_A,
+		Enums.DNS_RECORD_TYPE_AAAA,
+	} {
+		decision := matcher.Match(litePacketWithQuestion("vpn01.a.com", qType))
+		if decision.Action != ActionProcess {
+			t.Fatalf("qType %s: got action=%d want ActionProcess(%d) reason=%q",
+				Enums.DNSRecordTypeName(qType), decision.Action, ActionProcess, decision.Reason)
+		}
 	}
 }
 

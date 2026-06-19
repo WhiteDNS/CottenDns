@@ -19,15 +19,15 @@
         "FileSubtype": "00"
     },
     "StringFileInfo": {
-        "Comments": "StormDNS Server",
-        "CompanyName": "nullroute1970",
-        "FileDescription": "StormDNS Server",
+        "Comments": "CottenpickDNS Server",
+        "CompanyName": "tajirax",
+        "FileDescription": "CottenpickDNS Server",
         "FileVersion": "1.0.0.0",
-        "InternalName": "StormDNS_Server",
-        "LegalCopyright": "Copyright (c) 2026 nullroute1970",
+        "InternalName": "CottenpickDNS_Server",
+        "LegalCopyright": "Copyright (c) 2026 tajirax",
         "LegalTrademarks": "",
-        "OriginalFilename": "StormDNS_Server.exe",
-        "ProductName": "StormDNS",
+        "OriginalFilename": "CottenpickDNS_Server.exe",
+        "ProductName": "CottenpickDNS",
         "ProductVersion": "1.0.0.0"
     },
     "VarFileInfo": {
@@ -36,5 +36,5 @@
             "CharsetID": "04B0"
         }
     },
-    "IconPath": "../../assets/stormdns.ico"
+    "IconPath": "../../assets/cottenpickdns.ico"
 }

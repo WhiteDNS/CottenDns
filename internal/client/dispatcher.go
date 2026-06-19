@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -12,8 +12,8 @@ import (
 	"sort"
 	"time"
 
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 func (c *Client) selectTargetConnections(packetType uint8, streamID uint16) []Connection {
@@ -115,96 +115,7 @@ dispatchLoop:
 			continue
 		}
 
-		var selected *Stream_client
-		var peekedItem *clientStreamTXPacket
-		var peekedOK bool
-		var selectedStreamID uint16
-		var selectedID int32 = -2
-		rrApplied := false
-
-		startIndex := -1
-		for i, id := range ids {
-			if id >= rrCursor {
-				startIndex = i
-				break
-			}
-		}
-		if startIndex == -1 {
-			startIndex = 0
-		}
-
-		for i := 0; i < len(ids); i++ {
-			idx := (startIndex + i) % len(ids)
-			id := ids[idx]
-
-			if id == -1 {
-				if c.orphanQueue == nil || c.orphanQueue.FastSize() == 0 {
-					continue
-				}
-				p, _, ok := c.orphanQueue.Peek()
-				if !ok {
-					continue
-				}
-
-				peekedItem = &clientStreamTXPacket{
-					PacketType:     p.PacketType,
-					SequenceNum:    p.SequenceNum,
-					FragmentID:     p.FragmentID,
-					TotalFragments: p.TotalFragments,
-					Payload:        nil,
-				}
-
-				selectedStreamID = p.StreamID
-				selectedID = -1
-				peekedOK = true
-			} else {
-				s := streams[uint16(id)]
-				if s == nil || s.txQueue == nil {
-					continue
-				}
-				peekedItem, _, peekedOK = s.txQueue.Peek()
-				if peekedOK {
-					selectedStreamID = uint16(id)
-					selectedID = int32(id)
-					selected = s
-				}
-			}
-
-			if peekedOK && peekedItem != nil {
-				if !rrApplied {
-					rrCursor = id + 1
-					rrApplied = true
-				}
-
-				if id == 0 && peekedItem.PacketType == Enums.PACKET_PING {
-					hasOtherWork := false
-					for _, otherID := range ids {
-						if otherID == 0 {
-							continue
-						}
-						if otherID == -1 {
-							if c.orphanQueue != nil && c.orphanQueue.FastSize() > 0 {
-								hasOtherWork = true
-								break
-							}
-							continue
-						}
-						os := streams[uint16(otherID)]
-						if os != nil && os.txQueue != nil && os.txQueue.FastSize() > 0 {
-							hasOtherWork = true
-							break
-						}
-					}
-					if hasOtherWork {
-						peekedItem = nil
-						peekedOK = false
-						continue
-					}
-				}
-
-				break
-			}
-		}
+		selected, peekedItem, selectedStreamID, selectedID := c.selectNextDispatchStream(ids, streams, &rrCursor)
 
 		if selectedID == -2 || peekedItem == nil {
 			if !waitForWork() {
@@ -274,111 +185,7 @@ dispatchLoop:
 			continue dispatchLoop
 		}
 
-		var finalPacketType uint8
-		var finalPayload []byte
-		wasPacked := false
-		maxBlocks := c.maxPackedBlocks
-		if maxBlocks < 1 {
-			maxBlocks = 1
-		}
-
-		if VpnProto.IsPackableControlPacket(item.PacketType, len(item.Payload)) && maxBlocks > 1 {
-			payload := make([]byte, 0, maxBlocks*VpnProto.PackedControlBlockSize)
-			payload = VpnProto.AppendPackedControlBlock(payload, item.PacketType, selectedStreamID, item.SequenceNum, item.FragmentID, item.TotalFragments)
-			blocks := 1
-
-			if selected != nil {
-				for blocks < maxBlocks {
-					popped, poppedOK := selected.txQueue.PopAnyIf(2, func(p *clientStreamTXPacket) bool {
-						return VpnProto.IsPackableControlPacket(p.PacketType, len(p.Payload))
-					}, func(p *clientStreamTXPacket) uint64 {
-						return Enums.PacketIdentityKey(selected.StreamID, p.PacketType, p.SequenceNum, p.FragmentID)
-					})
-					if !poppedOK {
-						break
-					}
-					selected.NoteTXPacketDequeued(popped)
-					payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, selected.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
-					blocks++
-					selected.ReleaseTXPacket(popped)
-				}
-			} else if selectedID == -1 {
-				for blocks < maxBlocks {
-					popped, poppedOK := c.orphanQueue.PopAnyIf(2, func(p VpnProto.Packet) bool {
-						return VpnProto.IsPackableControlPacket(p.PacketType, 0)
-					}, func(p VpnProto.Packet) uint64 {
-						return Enums.PacketTypeStreamKey(p.StreamID, p.PacketType)
-					})
-					if !poppedOK {
-						break
-					}
-					payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, popped.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
-					blocks++
-				}
-			}
-
-			if blocks < maxBlocks {
-				for _, otherID := range ids {
-					if blocks >= maxBlocks {
-						break
-					}
-					if otherID == selectedID {
-						continue
-					}
-
-					if otherID == -1 {
-						for blocks < maxBlocks {
-							popped, poppedOK := c.orphanQueue.PopAnyIf(2, func(p VpnProto.Packet) bool {
-								return VpnProto.IsPackableControlPacket(p.PacketType, 0)
-							}, func(p VpnProto.Packet) uint64 {
-								return Enums.PacketTypeStreamKey(p.StreamID, p.PacketType)
-							})
-							if !poppedOK {
-								break
-							}
-							payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, popped.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
-							blocks++
-						}
-						continue
-					}
-
-					otherStream := streams[uint16(otherID)]
-					if otherStream == nil || otherStream.txQueue == nil {
-						continue
-					}
-					for blocks < maxBlocks {
-						popped, poppedOK := otherStream.txQueue.PopAnyIf(2, func(p *clientStreamTXPacket) bool {
-							return VpnProto.IsPackableControlPacket(p.PacketType, len(p.Payload))
-						}, func(p *clientStreamTXPacket) uint64 {
-							return Enums.PacketIdentityKey(uint16(otherID), p.PacketType, p.SequenceNum, p.FragmentID)
-						})
-						if !poppedOK {
-							break
-						}
-						otherStream.NoteTXPacketDequeued(popped)
-						payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, uint16(otherID), popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
-						blocks++
-						otherStream.ReleaseTXPacket(popped)
-					}
-				}
-			}
-
-			if blocks > 1 {
-				finalPacketType = Enums.PACKET_PACKED_CONTROL_BLOCKS
-				finalPayload = payload
-				wasPacked = true
-
-				if selected != nil {
-					selected.ReleaseTXPacket(item)
-				}
-			} else {
-				finalPacketType = item.PacketType
-				finalPayload = item.Payload
-			}
-		} else {
-			finalPacketType = item.PacketType
-			finalPayload = item.Payload
-		}
+		finalPacketType, finalPayload, wasPacked := c.packControlBlocks(item, selected, selectedID, selectedStreamID, ids, streams)
 
 		c.pingManager.NotifyPacket(finalPacketType, false)
 
@@ -423,4 +230,230 @@ dispatchLoop:
 			return
 		}
 	}
+}
+
+// selectNextDispatchStream performs one fair round-robin scan over the active
+// stream IDs (plus the orphan-queue sentinel -1), starting just past *rrCursor,
+// and returns the first stream/orphan that has a packet ready to send. It peeks
+// (does not pop) the chosen packet and advances *rrCursor to the id following
+// the first candidate examined.
+//
+// A PING on the control stream (id 0) is deferred when any other stream or the
+// orphan queue has work, so data/control traffic is not starved by keepalives.
+//
+// When nothing is ready it returns selectedID == -2 and a nil item. Note: as in
+// the original inline loop, `selected` is only assigned on the stream branch and
+// is intentionally not cleared when a later orphan pick wins — callers key off
+// selectedID, and this preserves the pre-extraction behavior exactly.
+func (c *Client) selectNextDispatchStream(
+	ids []int32,
+	streams map[uint16]*Stream_client,
+	rrCursor *int32,
+) (selected *Stream_client, peekedItem *clientStreamTXPacket, selectedStreamID uint16, selectedID int32) {
+	var peekedOK bool
+	selectedID = -2
+	rrApplied := false
+
+	startIndex := -1
+	for i, id := range ids {
+		if id >= *rrCursor {
+			startIndex = i
+			break
+		}
+	}
+	if startIndex == -1 {
+		startIndex = 0
+	}
+
+	for i := 0; i < len(ids); i++ {
+		idx := (startIndex + i) % len(ids)
+		id := ids[idx]
+
+		if id == -1 {
+			if c.orphanQueue == nil || c.orphanQueue.FastSize() == 0 {
+				continue
+			}
+			p, _, ok := c.orphanQueue.Peek()
+			if !ok {
+				continue
+			}
+
+			peekedItem = &clientStreamTXPacket{
+				PacketType:     p.PacketType,
+				SequenceNum:    p.SequenceNum,
+				FragmentID:     p.FragmentID,
+				TotalFragments: p.TotalFragments,
+				Payload:        nil,
+			}
+
+			selectedStreamID = p.StreamID
+			selectedID = -1
+			peekedOK = true
+		} else {
+			s := streams[uint16(id)]
+			if s == nil || s.txQueue == nil {
+				continue
+			}
+			peekedItem, _, peekedOK = s.txQueue.Peek()
+			if peekedOK {
+				selectedStreamID = uint16(id)
+				selectedID = int32(id)
+				selected = s
+			}
+		}
+
+		if peekedOK && peekedItem != nil {
+			if !rrApplied {
+				*rrCursor = id + 1
+				rrApplied = true
+			}
+
+			if id == 0 && peekedItem.PacketType == Enums.PACKET_PING {
+				hasOtherWork := false
+				for _, otherID := range ids {
+					if otherID == 0 {
+						continue
+					}
+					if otherID == -1 {
+						if c.orphanQueue != nil && c.orphanQueue.FastSize() > 0 {
+							hasOtherWork = true
+							break
+						}
+						continue
+					}
+					os := streams[uint16(otherID)]
+					if os != nil && os.txQueue != nil && os.txQueue.FastSize() > 0 {
+						hasOtherWork = true
+						break
+					}
+				}
+				if hasOtherWork {
+					peekedItem = nil
+					peekedOK = false
+					continue
+				}
+			}
+
+			break
+		}
+	}
+
+	return selected, peekedItem, selectedStreamID, selectedID
+}
+
+// packControlBlocks attempts to coalesce the selected packet together with other
+// pending packable control packets (from the selected stream, the orphan queue,
+// and other streams) into a single PACKET_PACKED_CONTROL_BLOCKS frame.
+//
+// It returns the packet type and payload to actually transmit and whether
+// packing occurred. When packing succeeds and the packet came from a real
+// stream, the original item is released here (mirroring the inline behavior it
+// was extracted from). When the packet is not packable, packing is disabled
+// (maxPackedBlocks <= 1), or only the single block could be gathered, the
+// original packet type and payload are returned unchanged.
+func (c *Client) packControlBlocks(
+	item *clientStreamTXPacket,
+	selected *Stream_client,
+	selectedID int32,
+	selectedStreamID uint16,
+	ids []int32,
+	streams map[uint16]*Stream_client,
+) (finalPacketType uint8, finalPayload []byte, wasPacked bool) {
+	maxBlocks := c.maxPackedBlocks
+	if maxBlocks < 1 {
+		maxBlocks = 1
+	}
+
+	if !VpnProto.IsPackableControlPacket(item.PacketType, len(item.Payload)) || maxBlocks <= 1 {
+		return item.PacketType, item.Payload, false
+	}
+
+	payload := make([]byte, 0, maxBlocks*VpnProto.PackedControlBlockSize)
+	payload = VpnProto.AppendPackedControlBlock(payload, item.PacketType, selectedStreamID, item.SequenceNum, item.FragmentID, item.TotalFragments)
+	blocks := 1
+
+	if selected != nil {
+		for blocks < maxBlocks {
+			popped, poppedOK := selected.txQueue.PopAnyIf(2, func(p *clientStreamTXPacket) bool {
+				return VpnProto.IsPackableControlPacket(p.PacketType, len(p.Payload))
+			}, func(p *clientStreamTXPacket) uint64 {
+				return Enums.PacketIdentityKey(selected.StreamID, p.PacketType, p.SequenceNum, p.FragmentID)
+			})
+			if !poppedOK {
+				break
+			}
+			selected.NoteTXPacketDequeued(popped)
+			payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, selected.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
+			blocks++
+			selected.ReleaseTXPacket(popped)
+		}
+	} else if selectedID == -1 {
+		for blocks < maxBlocks {
+			popped, poppedOK := c.orphanQueue.PopAnyIf(2, func(p VpnProto.Packet) bool {
+				return VpnProto.IsPackableControlPacket(p.PacketType, 0)
+			}, func(p VpnProto.Packet) uint64 {
+				return Enums.PacketTypeStreamKey(p.StreamID, p.PacketType)
+			})
+			if !poppedOK {
+				break
+			}
+			payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, popped.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
+			blocks++
+		}
+	}
+
+	if blocks < maxBlocks {
+		for _, otherID := range ids {
+			if blocks >= maxBlocks {
+				break
+			}
+			if otherID == selectedID {
+				continue
+			}
+
+			if otherID == -1 {
+				for blocks < maxBlocks {
+					popped, poppedOK := c.orphanQueue.PopAnyIf(2, func(p VpnProto.Packet) bool {
+						return VpnProto.IsPackableControlPacket(p.PacketType, 0)
+					}, func(p VpnProto.Packet) uint64 {
+						return Enums.PacketTypeStreamKey(p.StreamID, p.PacketType)
+					})
+					if !poppedOK {
+						break
+					}
+					payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, popped.StreamID, popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
+					blocks++
+				}
+				continue
+			}
+
+			otherStream := streams[uint16(otherID)]
+			if otherStream == nil || otherStream.txQueue == nil {
+				continue
+			}
+			for blocks < maxBlocks {
+				popped, poppedOK := otherStream.txQueue.PopAnyIf(2, func(p *clientStreamTXPacket) bool {
+					return VpnProto.IsPackableControlPacket(p.PacketType, len(p.Payload))
+				}, func(p *clientStreamTXPacket) uint64 {
+					return Enums.PacketIdentityKey(uint16(otherID), p.PacketType, p.SequenceNum, p.FragmentID)
+				})
+				if !poppedOK {
+					break
+				}
+				otherStream.NoteTXPacketDequeued(popped)
+				payload = VpnProto.AppendPackedControlBlock(payload, popped.PacketType, uint16(otherID), popped.SequenceNum, popped.FragmentID, popped.TotalFragments)
+				blocks++
+				otherStream.ReleaseTXPacket(popped)
+			}
+		}
+	}
+
+	if blocks > 1 {
+		if selected != nil {
+			selected.ReleaseTXPacket(item)
+		}
+		return Enums.PACKET_PACKED_CONTROL_BLOCKS, payload, true
+	}
+
+	return item.PacketType, item.Payload, false
 }

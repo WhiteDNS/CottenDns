@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -13,7 +13,7 @@ import (
 )
 
 func TestRawBase64RoundTrip(t *testing.T) {
-	original := []byte("StormDNS-response-payload-1234+/")
+	original := []byte("CottenpickDNS-response-payload-1234+/")
 	encoded := EncodeRawBase64(original)
 	decoded, err := DecodeRawBase64(encoded)
 	if err != nil {

@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	DnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 type Action uint8
@@ -89,7 +89,7 @@ func (m *Matcher) Match(parsed DnsParser.LitePacket) Decision {
 		}
 	}
 
-	if q0.Type != Enums.DNS_RECORD_TYPE_TXT {
+	if !Enums.IsTunnelTransportQueryType(q0.Type) {
 		return Decision{
 			Action:       ActionNoData,
 			Reason:       "unsupported-qtype",

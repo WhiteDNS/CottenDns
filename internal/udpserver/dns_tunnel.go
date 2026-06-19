@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"stormdns-go/internal/dnscache"
-	DnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/inflight"
+	"cottenpickdns-go/internal/dnscache"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/inflight"
 )
 
 var ErrInvalidDNSUpstream = errors.New("invalid dns upstream")

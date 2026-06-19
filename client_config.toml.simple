@@ -1,5 +1,5 @@
 # ==============================================================================
-# StormDNS Go Client Configuration (Sample)
+# CottenpickDNS Go Client Configuration (Sample)
 # This sample is written for the current Go client implementation.
 # Every key below is read by code or intentionally kept as an active runtime knob.
 # Profile below is biased toward lossy / high-latency links with many resolvers.
@@ -17,6 +17,22 @@
 # At least one domain is required.
 # All domains must be handled by the same server. Do not use different domains across multiple servers.
 DOMAINS = ["v.domain.com"]
+
+# DNS record types the client rotates over when building tunnel queries (A1,
+# anti-fingerprinting). Names are case-insensitive. The tunnel payload always
+# rides in the query name, so any of these work; the server answers TXT queries
+# with TXT and other types with a CNAME (falling back to TXT for large payloads).
+# Unset / empty = TXT only (historical behavior). Recognized:
+#   TXT, CNAME, A, AAAA, MX, NS, PTR, SRV, SVCB, CAA, NAPTR, SOA, HTTPS
+# Example: QUERY_TYPES = ["TXT", "CNAME", "A", "AAAA"]
+QUERY_TYPES = ["TXT"]
+
+# When true, the duplicate copies of a packet (see *_PACKET_DUPLICATION_COUNT)
+# are sent across distinct tunnel domains where possible, instead of just
+# distinct resolvers (A6). This gives independent delivery paths on lossy links
+# and spreads query volume across domains. Has no effect with a single domain or
+# a duplication count of 1. Default false.
+DUPLICATION_PREFER_DISTINCT_DOMAINS = false
 
 # Encryption method for tunnel payloads.
 # Allowed values:
@@ -387,7 +403,7 @@ LOG_DIR = "logs"
 
 # File name template for the session log file.
 # {time} is replaced with the startup timestamp (YYYYMMDD_HHMMSS).
-LOG_FILE_NAME = "stormdns_{time}.log"
+LOG_FILE_NAME = "cottenpickdns_{time}.log"
 
 # Interval in seconds at which upload/download speed and cumulative session
 # totals are printed to the console log window.

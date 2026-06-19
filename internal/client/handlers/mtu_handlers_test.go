@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 package handlers
@@ -9,8 +9,8 @@ package handlers
 import (
 	"testing"
 
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 type mtuTestClientContext struct {

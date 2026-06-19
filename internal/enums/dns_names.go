@@ -1,13 +1,84 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
 package enums
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
+
+// DNSRecordTypeFromName maps a case-insensitive record-type name (e.g. "TXT",
+// "cname", "AAAA") to its numeric qType. It returns (code, true) on success and
+// (0, false) for an unknown name. Only the types CottenpickDNS can actually carry a
+// tunnel query/response over are recognized.
+func DNSRecordTypeFromName(name string) (uint16, bool) {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "A":
+		return DNS_RECORD_TYPE_A, true
+	case "AAAA":
+		return DNS_RECORD_TYPE_AAAA, true
+	case "CNAME":
+		return DNS_RECORD_TYPE_CNAME, true
+	case "MX":
+		return DNS_RECORD_TYPE_MX, true
+	case "NS":
+		return DNS_RECORD_TYPE_NS, true
+	case "PTR":
+		return DNS_RECORD_TYPE_PTR, true
+	case "SRV":
+		return DNS_RECORD_TYPE_SRV, true
+	case "SVCB":
+		return DNS_RECORD_TYPE_SVCB, true
+	case "CAA":
+		return DNS_RECORD_TYPE_CAA, true
+	case "NAPTR":
+		return DNS_RECORD_TYPE_NAPTR, true
+	case "SOA":
+		return DNS_RECORD_TYPE_SOA, true
+	case "TXT":
+		return DNS_RECORD_TYPE_TXT, true
+	case "HTTPS":
+		return DNS_RECORD_TYPE_HTTPS, true
+	default:
+		return 0, false
+	}
+}
+
+// IsTunnelTransportQueryType reports whether qType is a record type the VPN
+// tunnel transport may use to carry a query (A1 query-type rotation). The
+// tunnel payload always rides in the QNAME labels, so the server accepts any of
+// these types as a tunnel candidate regardless of the answer encoding. This set
+// must stay in sync with DNSRecordTypeFromName (the client-side parser).
+//
+// Note: this is distinct from IsSupportedTunnelDNSQuery in the dnsparser
+// package, which gates the *DNS-over-tunnel* resolver feature and deliberately
+// excludes TXT.
+func IsTunnelTransportQueryType(qType uint16) bool {
+	switch qType {
+	case
+		DNS_RECORD_TYPE_A,
+		DNS_RECORD_TYPE_AAAA,
+		DNS_RECORD_TYPE_CNAME,
+		DNS_RECORD_TYPE_MX,
+		DNS_RECORD_TYPE_NS,
+		DNS_RECORD_TYPE_PTR,
+		DNS_RECORD_TYPE_SRV,
+		DNS_RECORD_TYPE_SVCB,
+		DNS_RECORD_TYPE_CAA,
+		DNS_RECORD_TYPE_NAPTR,
+		DNS_RECORD_TYPE_SOA,
+		DNS_RECORD_TYPE_TXT,
+		DNS_RECORD_TYPE_HTTPS:
+		return true
+	default:
+		return false
+	}
+}
 
 func DNSRecordTypeName(qType uint16) string {
 	switch qType {

@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (async_runtime.go) handles async parallel background workers.
 // ==============================================================================
 package client
@@ -16,10 +16,10 @@ import (
 	"net"
 	"time"
 
-	"stormdns-go/internal/arq"
-	"stormdns-go/internal/client/handlers"
-	DnsParser "stormdns-go/internal/dnsparser"
-	fragmentStore "stormdns-go/internal/fragmentstore"
+	"cottenpickdns-go/internal/arq"
+	"cottenpickdns-go/internal/client/handlers"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	fragmentStore "cottenpickdns-go/internal/fragmentstore"
 )
 
 const clientRXDropLogInterval = 2 * time.Second
@@ -514,6 +514,9 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 				firstDomain    string
 				firstDNSPacket []byte
 			)
+			// Pick one query type for this datagram so all of its duplicate
+			// sends (across resolvers/domains) carry the same qType (A1).
+			datagramQueryType := c.nextQueryType()
 			if packetByDomain != nil {
 				clear(packetByDomain)
 			}
@@ -548,7 +551,7 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 				var dnsPacket []byte
 				switch {
 				case firstDNSPacket == nil:
-					dnsPacket, err = buildTunnelTXTQuestionBytesPrepared(prepared, encoded)
+					dnsPacket, err = buildTunnelTXTQuestionBytesPrepared(prepared, encoded, datagramQueryType)
 					if err != nil {
 						continue
 					}
@@ -563,7 +566,7 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 					var cached bool
 					dnsPacket, cached = packetByDomain[domain]
 					if !cached {
-						dnsPacket, err = buildTunnelTXTQuestionBytesPrepared(prepared, encoded)
+						dnsPacket, err = buildTunnelTXTQuestionBytesPrepared(prepared, encoded, datagramQueryType)
 						if err != nil {
 							continue
 						}
@@ -721,8 +724,9 @@ func (c *Client) asyncProcessorWorker(ctx context.Context, id int) {
 func (c *Client) handleInboundPacket(data []byte, addr *net.UDPAddr, localAddr string) {
 	// c.log.Debugf("Inbound packet from %v (%d bytes)", addr, len(data))
 
-	// 1. Extract VPN Packet from DNS Response
-	vpnPacket, err := DnsParser.ExtractVPNResponse(data, c.responseMode == mtuProbeBase64Reply)
+	// 1. Extract VPN Packet from DNS Response (TXT chunks or, for A2 rotated
+	// queries, a CNAME answer decoded against the configured tunnel domains).
+	vpnPacket, err := DnsParser.ExtractVPNResponseMatching(data, c.responseMode == mtuProbeBase64Reply, c.cfg.Domains)
 	if err != nil {
 		if errors.Is(err, DnsParser.ErrTXTAnswerMissing) {
 			receivedAt := time.Now()

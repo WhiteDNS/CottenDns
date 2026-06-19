@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (mtu_logging.go) handles logging for MTU testing.
 // ==============================================================================
 package client
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"stormdns-go/internal/logger"
+	"cottenpickdns-go/internal/logger"
 )
 
 func (c *Client) mtuDebugEnabled() bool {

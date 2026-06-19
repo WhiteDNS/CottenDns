@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 package client
@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/arq"
-	"stormdns-go/internal/config"
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	"cottenpickdns-go/internal/config"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 func buildTCPTestClient() *Client {

@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -11,10 +11,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"stormdns-go/internal/compression"
-	DnsParser "stormdns-go/internal/dnsparser"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/logger"
+	"cottenpickdns-go/internal/compression"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/logger"
 )
 
 func (s *Server) debugLoggingEnabled() bool {

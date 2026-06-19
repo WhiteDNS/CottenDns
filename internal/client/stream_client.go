@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -12,9 +12,9 @@ import (
 	"sync" // Added for sync.Pool
 	"time"
 
-	"stormdns-go/internal/arq"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/mlq"
+	"cottenpickdns-go/internal/arq"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/mlq"
 )
 
 var txPacketPool = sync.Pool{

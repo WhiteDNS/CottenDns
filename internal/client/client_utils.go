@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the StormDNS client.
+// Package client provides the core logic for the CottenpickDNS client.
 // This file (client_utils.go) handles common client utility functions.
 // ==============================================================================
 package client
@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"stormdns-go/internal/arq"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/logger"
-	"stormdns-go/internal/version"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/logger"
+	"cottenpickdns-go/internal/version"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 // randomBytes generates random bytes using a cryptographically secure PRNG.
@@ -521,8 +521,8 @@ func (c *Client) ShortPrintBanner() {
 	}
 
 	c.log.Infof("============================================================")
-	c.log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/nullroute1970/StormDNS</yellow>")
-	c.log.Infof("<cyan>Telegram:</cyan> <yellow>@StormDNS</yellow>")
+	c.log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
+	c.log.Infof("<cyan>Telegram:</cyan> <yellow>@CottenpickDNS</yellow>")
 	c.log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	c.log.Infof("============================================================")
 }

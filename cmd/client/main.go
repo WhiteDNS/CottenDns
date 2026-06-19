@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -17,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"stormdns-go/internal/client"
-	"stormdns-go/internal/config"
-	"stormdns-go/internal/runtimepath"
-	"stormdns-go/internal/version"
+	"cottenpickdns-go/internal/client"
+	"cottenpickdns-go/internal/config"
+	"cottenpickdns-go/internal/runtimepath"
+	"cottenpickdns-go/internal/version"
 )
 
 func waitForExitInput() {
@@ -79,7 +79,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("StormDNS Client Version: %s\n", version.GetVersion())
+		fmt.Printf("CottenpickDNS Client Version: %s\n", version.GetVersion())
 		return
 	}
 
@@ -122,7 +122,7 @@ func main() {
 
 	log := app.Log()
 	if log != nil {
-		log.Infof("\U0001F680 <green>StormDNS Client Started</green>")
+		log.Infof("\U0001F680 <green>CottenpickDNS Client Started</green>")
 		log.Infof("\U0001F4C4 <green>Configuration loaded from: <cyan>%s</cyan></green>", resolvedConfigPath)
 		log.Infof("\U0001F5C2  <green>Connection Catalog: <cyan>%d</cyan> domain-resolver pairs</green>", len(app.Connections()))
 	}

@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -11,8 +11,8 @@ import (
 	"bytes"
 	"testing"
 
-	"stormdns-go/internal/compression"
-	Enums "stormdns-go/internal/enums"
+	"cottenpickdns-go/internal/compression"
+	Enums "cottenpickdns-go/internal/enums"
 )
 
 func TestPreparePayloadCompressesSupportedPacket(t *testing.T) {

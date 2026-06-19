@@ -3,7 +3,7 @@ package client
 import (
 	"testing"
 
-	"stormdns-go/internal/config"
+	"cottenpickdns-go/internal/config"
 )
 
 func TestNextSessionInitAttemptUsesBalancerSnapshotConnection(t *testing.T) {

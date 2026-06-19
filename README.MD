@@ -1,4 +1,4 @@
-<h1 align="center">⚡ StormDNS</h1>
+<h1 align="center">⚡ CottenpickDNS</h1>
 
 <p align="center">
   <strong>A DNS-based TCP tunnel for censored, lossy, high-latency networks.</strong>
@@ -13,18 +13,18 @@
 
 <p align="center">
   <a href="README_FA.MD">فارسی</a> ·
-  <a href="https://github.com/nullroute1970/StormDNS/releases/latest">Latest Release</a> ·
+  <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">Latest Release</a> ·
   <a href="https://t.me/nulllroute1970">Telegram Channel</a>
 </p>
 
-StormDNS is a client/server tunneling system that moves TCP traffic through DNS queries and DNS responses. The client runs on the user's device and exposes a local SOCKS5 proxy or a raw TCP listener. Applications connect to that local listener like they would connect to any normal proxy. StormDNS then splits each stream into small DNS-safe packets, applies optional compression and encryption, sends packets through one or more DNS resolvers, and reconstructs the stream on the remote StormDNS server. The server finally opens the real outbound connection directly, through an optional upstream SOCKS5 proxy, or to a fixed TCP target depending on configuration.
+CottenpickDNS is a client/server tunneling system that moves TCP traffic through DNS queries and DNS responses. The client runs on the user's device and exposes a local SOCKS5 proxy or a raw TCP listener. Applications connect to that local listener like they would connect to any normal proxy. CottenpickDNS then splits each stream into small DNS-safe packets, applies optional compression and encryption, sends packets through one or more DNS resolvers, and reconstructs the stream on the remote CottenpickDNS server. The server finally opens the real outbound connection directly, through an optional upstream SOCKS5 proxy, or to a fixed TCP target depending on configuration.
 
-The project is built for networks where common circumvention protocols are blocked, throttled, actively probed, or unreliable, but DNS traffic still has a usable path. This includes environments with small resolver payload limits, high latency, unstable resolver behavior, weak upload bandwidth, aggressive rate limits, and frequent packet loss. StormDNS treats those problems as normal operating conditions: it uses MTU discovery, resolver health checks, multi-resolver balancing, packet duplication, ARQ retransmission, ACK/NACK handling, packet packing, and log-based startup to keep the tunnel usable when the network is hostile.
+The project is built for networks where common circumvention protocols are blocked, throttled, actively probed, or unreliable, but DNS traffic still has a usable path. This includes environments with small resolver payload limits, high latency, unstable resolver behavior, weak upload bandwidth, aggressive rate limits, and frequent packet loss. CottenpickDNS treats those problems as normal operating conditions: it uses MTU discovery, resolver health checks, multi-resolver balancing, packet duplication, ARQ retransmission, ACK/NACK handling, packet packing, and log-based startup to keep the tunnel usable when the network is hostile.
 
 Typical deployment is straightforward: run the server on a VPS with UDP/53 reachable, delegate a short DNS subdomain to that server, put the generated encryption key and domain into the client config, add working resolvers, then point your browser or application at the local SOCKS5 listener. Advanced deployments can enable tunneled DNS handling, tune resolver/MTU behavior, chain server egress through another SOCKS5 proxy, or run the client as a Linux service.
 
 > [!NOTE]
-> DNS tunneling is constrained by resolver payload size, latency, rate limits, and packet loss. StormDNS is built for usable connectivity under pressure, not for unrealistic benchmark-only claims or replacing a normal VPN on clean, high-bandwidth networks.
+> DNS tunneling is constrained by resolver payload size, latency, rate limits, and packet loss. CottenpickDNS is built for usable connectivity under pressure, not for unrealistic benchmark-only claims or replacing a normal VPN on clean, high-bandwidth networks.
 
 ## 💸 Financial Support
 
@@ -50,7 +50,7 @@ Financial support is optional. If you want to support ongoing development, use o
 
 ## 🎯 Built For Hostile Networks
 
-| Network Reality | StormDNS Response |
+| Network Reality | CottenpickDNS Response |
 | --- | --- |
 | 📏 DNS payloads are small | Low protocol overhead, DNS-safe encoding, active MTU discovery |
 | 📉 Packet loss is normal | ARQ windows, ACK/NACK, retransmission timers, terminal drain handling |
@@ -58,7 +58,8 @@ Financial support is optional. If you want to support ongoing development, use o
 | ⬆️ Upload is often the bottleneck | Separate duplication controls for data, ACKs, setup, and control packets |
 | 🕒 Startup can be expensive | Resolver cache logs and log-based startup mode |
 | 🧪 Resolver behavior is inconsistent | Per-resolver MTU validation and balancing strategies |
-| 🧱 DPI/protocol filtering is common | DNS-only transport over ordinary UDP/53 query/response flow |
+| 🧱 DPI/protocol filtering is common | DNS-only transport over ordinary UDP/53 query/response flow, rotating query types (TXT/CNAME/A/AAAA/…), type-matched responses, and duplication spread across multiple domains |
+| 🔐 Key/method policy varies per client | Server auto-detects the client's encryption method, so a client can change it without server reconfiguration |
 
 ## ✨ Main Capabilities
 
@@ -69,7 +70,8 @@ Financial support is optional. If you want to support ongoing development, use o
 | 📡 Resolver runtime | Random, round-robin, least-loss, and lowest-latency balancing |
 | 🔁 Reliability | ARQ, ACK/NACK, RTO, retry limits, stream cleanup, packed controls |
 | 📦 Efficiency | MTU discovery, packet packing, optional base encoding, ZSTD/LZ4/ZLIB |
-| 🔐 Security | None, XOR, ChaCha20, AES-128-GCM, AES-192-GCM, AES-256-GCM |
+| 🕵️ Anti-fingerprinting | Configurable query-type rotation (`QUERY_TYPES`), response RR-type matching (TXT→TXT, others→CNAME with TXT fallback), domain-diverse packet duplication (`DUPLICATION_PREFER_DISTINCT_DOMAINS`) |
+| 🔐 Security | None, XOR, ChaCha20, AES-128-GCM, AES-192-GCM, AES-256-GCM; server-side encryption-method auto-detection (`ENCRYPTION_AUTO_DETECT`) |
 | 📛 DNS features | Optional client-side local DNS listener/cache and server-side upstream DNS/cache |
 | 🧰 Operations | Linux systemd installers, CLI overrides, cross-platform release workflow |
 | 🧪 Testing | Standard Go tests across client, server, ARQ, config, DNS, protocol, and utility packages |
@@ -82,7 +84,7 @@ Financial support is optional. If you want to support ongoing development, use o
 | `cmd/server` | Server executable entrypoint |
 | `internal/client` | Client runtime, SOCKS/TCP listeners, resolver balancing, MTU, sessions |
 | `internal/udpserver` | Server runtime, DNS ingress, sessions, streams, deferred workers |
-| `internal/vpnproto` | StormDNS packet building, parsing, payloads, control packing |
+| `internal/vpnproto` | CottenpickDNS packet building, parsing, payloads, control packing |
 | `internal/arq` | Reliability window, retransmission, ACK/NACK logic |
 | `internal/security` | Encryption codecs and server key generation/loading |
 | `internal/compression` | ZSTD, LZ4, and ZLIB integration |
@@ -110,7 +112,7 @@ v.example.com   NS  ns.example.com
 ### 2. Install Server
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
 ```
 
 After startup, the server prints the active encryption key and writes it to `encrypt_key.txt`.
@@ -142,7 +144,7 @@ Add resolvers to `client_resolvers.txt`:
 ### 4. Run Client
 
 ```bash
-./StormDNS_Client_Linux_AMD64 --config client_config.toml
+./CottenpickDNS_Client_Linux_AMD64 --config client_config.toml
 ```
 
 Then configure your browser or app:
@@ -198,7 +200,7 @@ Short labels matter. A shorter domain leaves more room for payload inside the DN
 Run on the remote Linux server:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
 ```
 
 The installer:
@@ -211,7 +213,7 @@ The installer:
 | 🔥 Firewall | Opens DNS port `53` where supported by the host firewall tool |
 | ⚙️ Tuning | Applies UDP, socket buffer, file descriptor, and systemd limits |
 | 🔑 Key | Starts the server once to generate `encrypt_key.txt` |
-| 🧰 Service | Installs and starts the `stormdns` systemd service |
+| 🧰 Service | Installs and starts the `cottenpickdns` systemd service |
 | 🧱 Egress filter | Rejects outbound TCP/53 to avoid incorrect TCP DNS behavior |
 
 Installer options:
@@ -226,24 +228,24 @@ Installer options:
 Examples:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
 sudo bash server_linux_install.sh --local
-bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh) --uninstall
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --uninstall
 ```
 
 Useful service commands:
 
 ```bash
-systemctl status stormdns
-journalctl -u stormdns -f
-systemctl restart stormdns
-systemctl stop stormdns
+systemctl status cottenpickdns
+journalctl -u cottenpickdns -f
+systemctl restart cottenpickdns
+systemctl stop cottenpickdns
 ```
 
 ### 🧪 Manual Server Run
 
 ```bash
-./StormDNS_Server_Linux_AMD64 --config server_config.toml
+./CottenpickDNS_Server_Linux_AMD64 --config server_config.toml
 ```
 
 Useful server flags:
@@ -257,7 +259,7 @@ Useful server flags:
 Every TOML key can be overridden using a lower-case dashed flag generated from the TOML key:
 
 ```bash
-./StormDNS_Server_Linux_AMD64 --config server_config.toml --udp-port 5353 --log-level DEBUG
+./CottenpickDNS_Server_Linux_AMD64 --config server_config.toml --udp-port 5353 --log-level DEBUG
 ```
 
 <a id="client-setup"></a>
@@ -267,14 +269,14 @@ Every TOML key can be overridden using a lower-case dashed flag generated from t
 Download the client archive for your platform from:
 
 ```text
-https://github.com/nullroute1970/StormDNS/releases/latest
+https://github.com/TaJirax/cottenpickDNS/releases/latest
 ```
 
 Client release archives include:
 
 | File | Purpose |
 | --- | --- |
-| `StormDNS_Client_*` | Client executable |
+| `CottenpickDNS_Client_*` | Client executable |
 | `client_config.toml` | Client config template |
 | `client_resolvers.txt` | Resolver list template |
 | `client_linux_install.sh` | Linux systemd installer, Linux archives only |
@@ -294,13 +296,13 @@ STARTUP_MODE = "resolvers"
 Run manually:
 
 ```bash
-./StormDNS_Client_Linux_AMD64 --config client_config.toml
+./CottenpickDNS_Client_Linux_AMD64 --config client_config.toml
 ```
 
 Windows example:
 
 ```powershell
-.\StormDNS_Client_Windows_AMD64.exe --config client_config.toml
+.\CottenpickDNS_Client_Windows_AMD64.exe --config client_config.toml
 ```
 
 Useful client flags:
@@ -314,7 +316,7 @@ Useful client flags:
 CLI override example:
 
 ```bash
-./StormDNS_Client_Linux_AMD64 --config client_config.toml --listen-port 18001 --startup-mode logs
+./CottenpickDNS_Client_Linux_AMD64 --config client_config.toml --listen-port 18001 --startup-mode logs
 ```
 
 ### 🐧 Linux Client Service
@@ -328,9 +330,9 @@ sudo bash client_linux_install.sh
 Service commands:
 
 ```bash
-systemctl status stormdns-client
-journalctl -u stormdns-client -f
-systemctl restart stormdns-client
+systemctl status cottenpickdns-client
+journalctl -u cottenpickdns-client -f
+systemctl restart cottenpickdns-client
 ```
 
 The client service runs non-interactively. If the config still has `STARTUP_MODE = "ask"`, the installer changes it to `logs`.
@@ -339,15 +341,15 @@ The client service runs non-interactively. If the config still has `STARTUP_MODE
 
 ## ⚙️ Configuration Overview
 
-StormDNS uses TOML configuration files. There are no environment-variable configuration paths. Runtime paths are resolved relative to the executable/config location through `internal/runtimepath` and config helpers.
+CottenpickDNS uses TOML configuration files. There are no environment-variable configuration paths. Runtime paths are resolved relative to the executable/config location through `internal/runtimepath` and config helpers.
 
 ### 🔐 Values That Must Match
 
 | Meaning | Client | Server | Notes |
 | --- | --- | --- | --- |
 | Tunnel domain | `DOMAINS` | `DOMAIN` | Must point to the server through DNS delegation |
-| Encryption method | `DATA_ENCRYPTION_METHOD` | `DATA_ENCRYPTION_METHOD` | Numeric method IDs must match |
-| Encryption key | `ENCRYPTION_KEY` | contents of `ENCRYPTION_KEY_FILE` | Server creates/loads the key file |
+| Encryption method | `DATA_ENCRYPTION_METHOD` | `DATA_ENCRYPTION_METHOD` | Need not match when the server has `ENCRYPTION_AUTO_DETECT = true` (default): the server detects the client's method automatically. The server value is just the method it tries first. |
+| Encryption key | `ENCRYPTION_KEY` | contents of `ENCRYPTION_KEY_FILE` | Must match. Server creates/loads the key file; one key works across all methods. |
 
 ### 🔒 Encryption Methods
 
@@ -359,6 +361,16 @@ StormDNS uses TOML configuration files. There are no environment-variable config
 | `3` | AES-128-GCM | Authenticated encryption |
 | `4` | AES-192-GCM | Authenticated encryption |
 | `5` | AES-256-GCM | Authenticated encryption |
+
+With `ENCRYPTION_AUTO_DETECT = true` (server default) the server builds a codec for every method from the shared key and detects which one each client used by trying to decrypt. Authenticated (AES-GCM) methods are tried first, so they can never be mis-detected by an unauthenticated codec. This lets clients change `DATA_ENCRYPTION_METHOD` without touching the server. Set it to `false` to accept only the configured method.
+
+### 🕵️ DNS Anti-Fingerprinting
+
+| Feature | Key (side) | Behavior |
+| --- | --- | --- |
+| Query-type rotation | `QUERY_TYPES` (client) | Rotates the DNS record type per query over a configurable set (e.g. `["TXT","CNAME","A","AAAA"]`); payload always rides in the query name, so the server accepts any of them. Unset = TXT only. |
+| Response type matching | automatic (server) | TXT queries get TXT answers; other query types get a CNAME answer (with automatic TXT fallback when the payload exceeds a single DNS name). |
+| Domain-diverse duplication | `DUPLICATION_PREFER_DISTINCT_DOMAINS` (client) | Sends the duplicate copies of a packet across distinct tunnel domains where possible, for independent delivery paths and spread query volume. No effect with a single domain or duplication count `1`. |
 
 ### 📦 Compression Methods
 
@@ -402,10 +414,10 @@ The sample files are the source of truth for defaults and operational comments:
 
 | Group | Keys |
 | --- | --- |
-| 🪪 Tunnel identity/security | `DOMAINS`, `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_KEY` |
+| 🪪 Tunnel identity/security | `DOMAINS`, `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_KEY`, `QUERY_TYPES` |
 | 🧦 Local proxy | `PROTOCOL_TYPE`, `LISTEN_IP`, `LISTEN_PORT`, `SOCKS5_AUTH`, `SOCKS5_USER`, `SOCKS5_PASS` |
 | 📛 Local DNS | `LOCAL_DNS_ENABLED`, `LOCAL_DNS_IP`, `LOCAL_DNS_PORT`, `LOCAL_DNS_CACHE_MAX_RECORDS`, `LOCAL_DNS_CACHE_TTL_SECONDS`, `LOCAL_DNS_PENDING_TIMEOUT_SECONDS`, `DNS_RESPONSE_FRAGMENT_TIMEOUT_SECONDS`, `LOCAL_DNS_CACHE_PERSIST_TO_FILE`, `LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS` |
-| 📡 Resolver/loss handling | `RESOLVER_BALANCING_STRATEGY`, `UPLOAD_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_PACKET_DUPLICATION_COUNT`, `UPLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `STREAM_RESOLVER_FAILOVER_RESEND_THRESHOLD`, `STREAM_RESOLVER_FAILOVER_COOLDOWN`, `RECHECK_INACTIVE_SERVERS_ENABLED`, `RECHECK_INACTIVE_INTERVAL_SECONDS`, `RECHECK_SERVER_INTERVAL_SECONDS`, `RECHECK_BATCH_SIZE`, `AUTO_DISABLE_TIMEOUT_SERVERS`, `AUTO_DISABLE_TIMEOUT_WINDOW_SECONDS`, `AUTO_DISABLE_MIN_OBSERVATIONS`, `AUTO_DISABLE_CHECK_INTERVAL_SECONDS`, `BASE_ENCODE_DATA` |
+| 📡 Resolver/loss handling | `RESOLVER_BALANCING_STRATEGY`, `UPLOAD_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_PACKET_DUPLICATION_COUNT`, `UPLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `STREAM_RESOLVER_FAILOVER_RESEND_THRESHOLD`, `STREAM_RESOLVER_FAILOVER_COOLDOWN`, `RECHECK_INACTIVE_SERVERS_ENABLED`, `RECHECK_INACTIVE_INTERVAL_SECONDS`, `RECHECK_SERVER_INTERVAL_SECONDS`, `RECHECK_BATCH_SIZE`, `AUTO_DISABLE_TIMEOUT_SERVERS`, `AUTO_DISABLE_TIMEOUT_WINDOW_SECONDS`, `AUTO_DISABLE_MIN_OBSERVATIONS`, `AUTO_DISABLE_CHECK_INTERVAL_SECONDS`, `BASE_ENCODE_DATA`, `DUPLICATION_PREFER_DISTINCT_DOMAINS` |
 | 📦 Compression | `UPLOAD_COMPRESSION_TYPE`, `DOWNLOAD_COMPRESSION_TYPE`, `COMPRESSION_MIN_SIZE` |
 | 📏 MTU discovery | `MIN_UPLOAD_MTU`, `MIN_DOWNLOAD_MTU`, `MAX_UPLOAD_MTU`, `MAX_DOWNLOAD_MTU`, `MTU_TEST_RETRIES_RESOLVERS`, `MTU_TEST_TIMEOUT_RESOLVERS`, `MTU_TEST_PARALLELISM_RESOLVERS`, `MTU_TEST_RETRIES_LOGS`, `MTU_TEST_TIMEOUT_LOGS`, `MTU_TEST_PARALLELISM_LOGS` |
 | ⚙️ Workers/queues/timers | `RX_TX_WORKERS`, `TUNNEL_PROCESS_WORKERS`, `TUNNEL_PACKET_TIMEOUT_SECONDS`, `DISPATCHER_IDLE_POLL_INTERVAL_SECONDS`, `TX_CHANNEL_SIZE`, `RX_CHANNEL_SIZE`, `RESOLVER_UDP_CONNECTION_POOL_SIZE`, `STREAM_QUEUE_INITIAL_CAPACITY`, `ORPHAN_QUEUE_INITIAL_CAPACITY`, `DNS_RESPONSE_FRAGMENT_STORE_CAPACITY`, `SOCKS_UDP_ASSOCIATE_READ_TIMEOUT_SECONDS`, `CLIENT_TERMINAL_STREAM_RETENTION_SECONDS`, `CLIENT_CANCELLED_SETUP_RETENTION_SECONDS` |
@@ -423,7 +435,7 @@ The sample files are the source of truth for defaults and operational comments:
 | 🧹 Session lifecycle | `INVALID_COOKIE_WINDOW_SECONDS`, `INVALID_COOKIE_ERROR_THRESHOLD`, `SESSION_TIMEOUT_SECONDS`, `SESSION_CLEANUP_INTERVAL_SECONDS`, `CLOSED_SESSION_RETENTION_SECONDS`, `SESSION_INIT_REUSE_TTL_SECONDS`, `RECENTLY_CLOSED_STREAM_TTL_SECONDS`, `RECENTLY_CLOSED_STREAM_CAP`, `TERMINAL_STREAM_RETENTION_SECONDS` |
 | 📛 DNS upstream/cache | `DNS_UPSTREAM_SERVERS`, `DNS_UPSTREAM_TIMEOUT`, `DNS_INFLIGHT_WAIT_TIMEOUT_SECONDS`, `DNS_FRAGMENT_ASSEMBLY_TIMEOUT`, `DNS_CACHE_MAX_RECORDS`, `DNS_CACHE_TTL_SECONDS` |
 | 🌍 Outbound path | `SOCKS_CONNECT_TIMEOUT`, `USE_EXTERNAL_SOCKS5`, `SOCKS5_AUTH`, `SOCKS5_USER`, `SOCKS5_PASS`, `FORWARD_IP`, `FORWARD_PORT` |
-| 🔐 Security | `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_KEY_FILE` |
+| 🔐 Security | `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_AUTO_DETECT`, `ENCRYPTION_KEY_FILE` |
 | 🔁 ARQ/packing | `MAX_PACKETS_PER_BATCH`, `PACKET_BLOCK_CONTROL_DUPLICATION`, `STREAM_SETUP_ACK_TTL_SECONDS`, `STREAM_RESULT_PACKET_TTL_SECONDS`, `STREAM_FAILURE_PACKET_TTL_SECONDS`, `ARQ_WINDOW_SIZE`, `ARQ_INITIAL_RTO_SECONDS`, `ARQ_MAX_RTO_SECONDS`, `ARQ_CONTROL_INITIAL_RTO_SECONDS`, `ARQ_CONTROL_MAX_RTO_SECONDS`, `ARQ_MAX_CONTROL_RETRIES`, `ARQ_INACTIVITY_TIMEOUT_SECONDS`, `ARQ_DATA_PACKET_TTL_SECONDS`, `ARQ_CONTROL_PACKET_TTL_SECONDS`, `ARQ_MAX_DATA_RETRIES`, `ARQ_DATA_NACK_MAX_GAP`, `ARQ_DATA_NACK_INITIAL_DELAY_SECONDS`, `ARQ_DATA_NACK_REPEAT_SECONDS`, `ARQ_TERMINAL_DRAIN_TIMEOUT_SECONDS`, `ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS` |
 | 📝 Logging/metadata | `LOG_LEVEL`, `CONFIG_VERSION` |
 
@@ -439,7 +451,7 @@ The sample files are the source of truth for defaults and operational comments:
 
 ## 📡 Resolver, MTU, And Loss Tuning
 
-Resolver choice determines whether StormDNS is usable. A resolver may work for ordinary DNS but fail for tunnel-sized labels, repeated queries, long names, or resolver-specific rate limits. Always let the client test your real resolver/domain path.
+Resolver choice determines whether CottenpickDNS is usable. A resolver may work for ordinary DNS but fail for tunnel-sized labels, repeated queries, long names, or resolver-specific rate limits. Always let the client test your real resolver/domain path.
 
 ### 🧪 Practical Resolver Workflow
 
@@ -543,9 +555,9 @@ Packet flow:
 ```mermaid
 sequenceDiagram
     participant App as Application
-    participant Client as StormDNS Client
+    participant Client as CottenpickDNS Client
     participant Resolver as DNS Resolver
-    participant Server as StormDNS Server
+    participant Server as CottenpickDNS Server
     participant Target as Target
 
     App->>Client: SOCKS5/TCP connection
@@ -572,7 +584,7 @@ Usable options:
 | 🖥️ LAN proxy | Run the client on a computer and let phones use it as SOCKS5 over LAN |
 | 📦 Router/VPS client | Run the client on a router, mini PC, or VPS and point devices at it |
 | 📱 Termux | Use Termux artifacts where supported by the release matrix |
-| 🔗 Chaining | Chain another local proxy/panel into the StormDNS SOCKS5 listener |
+| 🔗 Chaining | Chain another local proxy/panel into the CottenpickDNS SOCKS5 listener |
 
 If another device must connect to the client over LAN:
 
@@ -596,10 +608,10 @@ vYYYY.MM.DD.HHMMSS-commithash
 Artifacts follow this pattern:
 
 ```text
-StormDNS_Client_<Platform>_<ARCH>.zip
-StormDNS_Client_<Platform>_<ARCH>.tar.gz
-StormDNS_Server_<Platform>_<ARCH>.zip
-StormDNS_Server_<Platform>_<ARCH>.tar.gz
+CottenpickDNS_Client_<Platform>_<ARCH>.zip
+CottenpickDNS_Client_<Platform>_<ARCH>.tar.gz
+CottenpickDNS_Server_<Platform>_<ARCH>.zip
+CottenpickDNS_Server_<Platform>_<ARCH>.tar.gz
 ```
 
 The GitHub Actions release matrix includes Windows, Linux, Linux-Legacy, macOS, and Termux/Android targets. Client packages include the executable, `client_config.toml`, and `client_resolvers.txt`. Linux client packages also include `client_linux_install.sh`. Server packages include the executable and `server_config.toml`.
@@ -708,13 +720,13 @@ The client requires `ENCRYPTION_KEY`. Copy the exact value from the server's `en
 Restart the relevant process/service after editing TOML files:
 
 ```bash
-systemctl restart stormdns
-systemctl restart stormdns-client
+systemctl restart cottenpickdns
+systemctl restart cottenpickdns-client
 ```
 
 ## 🛡️ Security And Responsibility
 
-StormDNS is provided as-is, without warranty. You are responsible for how you deploy it, which networks you use it on, and whether that usage is legal in your jurisdiction.
+CottenpickDNS is provided as-is, without warranty. You are responsible for how you deploy it, which networks you use it on, and whether that usage is legal in your jurisdiction.
 
 Operational safety notes:
 
@@ -725,7 +737,7 @@ Operational safety notes:
 | 🧭 Prefer `127.0.0.1` for listeners | Limits exposure to the local machine |
 | 🔥 Open only required firewall ports | Public server needs DNS port `53`; client usually does not need public inbound access |
 | 📊 Monitor logs under heavy loss | Resolver behavior changes over time |
-| 🧱 Do not run another DNS server on the same port | StormDNS server needs UDP/53 for delegated tunnel traffic |
+| 🧱 Do not run another DNS server on the same port | CottenpickDNS server needs UDP/53 for delegated tunnel traffic |
 
 ## 🤝 Contributing
 
@@ -742,13 +754,13 @@ Project links:
 
 | Resource | Link |
 | --- | --- |
-| Issues | <https://github.com/nullroute1970/StormDNS/issues> |
-| Pull requests | <https://github.com/nullroute1970/StormDNS/pulls> |
+| Issues | <https://github.com/TaJirax/cottenpickDNS/issues> |
+| Pull requests | <https://github.com/TaJirax/cottenpickDNS/pulls> |
 | Telegram | <https://t.me/nulllroute1970> |
 
 ## 📄 License
 
-StormDNS is an independent fork/derivative of MasterDnsVPN.
+CottenpickDNS is an independent fork/derivative of MasterDnsVPN.
 
 Original project:
 
@@ -758,7 +770,7 @@ Original project:
 | Original author | Amin Mahmoudi |
 | License | MIT License |
 
-StormDNS modifications:
+CottenpickDNS modifications:
 
 | Item | Value |
 | --- | --- |

@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -11,15 +11,39 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"time"
 
-	"stormdns-go/internal/arq"
-	"stormdns-go/internal/compression"
-	DnsParser "stormdns-go/internal/dnsparser"
-	domainMatcher "stormdns-go/internal/domainmatcher"
-	Enums "stormdns-go/internal/enums"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	"cottenpickdns-go/internal/compression"
+	DnsParser "cottenpickdns-go/internal/dnsparser"
+	domainMatcher "cottenpickdns-go/internal/domainmatcher"
+	Enums "cottenpickdns-go/internal/enums"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
+
+// tunnelBaseDomain returns the configured tunnel domain that is the suffix of
+// requestName (longest match wins), or "" if none matches. It is used as the
+// CNAME target suffix for A2 response-type matching so the client can strip it
+// before decoding. Returning "" makes BuildVPNResponsePacketMatchingQuery fall
+// back to the TXT encoding.
+func (s *Server) tunnelBaseDomain(requestName string) string {
+	name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(requestName), "."))
+	if name == "" || s == nil || s.domainMatcher == nil {
+		return ""
+	}
+	best := ""
+	for _, d := range s.domainMatcher.Domains() {
+		dd := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(d), "."))
+		if dd == "" {
+			continue
+		}
+		if (name == dd || strings.HasSuffix(name, "."+dd)) && len(dd) > len(best) {
+			best = dd
+		}
+	}
+	return best
+}
 
 func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName string, vpnPacket VpnProto.Packet) postSessionValidation {
 	now := time.Now()
@@ -133,7 +157,7 @@ func invalidSessionDropLogConfig(reason string, sessionID uint8, receivedCookie 
 
 func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint8, responseMode uint8) []byte {
 	payload := s.nextInvalidDropPayload()
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, requestName, VpnProto.Packet{
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
 		SessionID:  sessionID,
 		PacketType: Enums.PACKET_ERROR_DROP,
 		Payload:    payload[:],
@@ -150,7 +174,7 @@ func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName str
 	}
 	var payload [mtuProbeCodeLength]byte
 	copy(payload[:], verifyCode[:mtuProbeCodeLength])
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, requestName, VpnProto.Packet{
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
 		SessionID:  0,
 		PacketType: Enums.PACKET_SESSION_BUSY,
 		Payload:    payload[:],
@@ -167,7 +191,7 @@ func (s *Server) buildSessionVPNResponse(questionPacket []byte, requestName stri
 	}
 	packet.SessionID = record.ID
 	packet.SessionCookie = record.Cookie
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, requestName, packet, record.ResponseBase64)
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64)
 	if err != nil {
 		return nil
 	}
@@ -734,7 +758,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 	responsePayload[2] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
 	copy(responsePayload[3:], record.VerifyCode[:])
 
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, decision.RequestName, VpnProto.Packet{
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:  0,
 		PacketType: Enums.PACKET_SESSION_ACCEPT,
 		Payload:    responsePayload[:],
@@ -764,7 +788,10 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 	}
 
 	responsePayload := buildMTUProbeMetaPayload(vpnPacket.Payload[1:mtuProbeUpMinSize], len(vpnPacket.Payload))
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, decision.RequestName, VpnProto.Packet{
+	// Match the response RR type to the probe query type (A2). The up-probe
+	// response is small, so it encodes cleanly as CNAME when the query was
+	// non-TXT, and its size does not affect upload-MTU measurement.
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:  vpnPacket.SessionID,
 		PacketType: Enums.PACKET_MTU_UP_RES,
 		Payload:    responsePayload[:],
@@ -800,7 +827,11 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 		fillMTUProbeBytes(payload[mtuProbeMetaLength:])
 	}
 
-	response, err := DnsParser.BuildVPNResponsePacket(questionPacket, decision.RequestName, VpnProto.Packet{
+	// Match the response RR type to the probe query type (A2). Large download
+	// probe sizes exceed a single CNAME and auto-fall-back to TXT inside the
+	// builder, so the download-capacity ceiling is still measured on the TXT
+	// channel that bulk data actually uses; smaller sizes match the query type.
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:      vpnPacket.SessionID,
 		PacketType:     Enums.PACKET_MTU_DOWN_RES,
 		StreamID:       vpnPacket.StreamID,

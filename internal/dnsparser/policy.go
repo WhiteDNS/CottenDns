@@ -1,13 +1,13 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
 package dnsparser
 
-import Enums "stormdns-go/internal/enums"
+import Enums "cottenpickdns-go/internal/enums"
 
 func IsSupportedTunnelDNSQuery(qType uint16, qClass uint16) bool {
 	if qClass != Enums.DNSQ_CLASS_IN {

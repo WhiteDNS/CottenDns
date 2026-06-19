@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/config"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/mlq"
+	"cottenpickdns-go/internal/config"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/mlq"
 )
 
 func TestStreamZeroAllowsMultipleQueuedPingsWithDifferentSequence(t *testing.T) {

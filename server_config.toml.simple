@@ -1,5 +1,5 @@
 # ==============================================================================
-# StormDNS Go Server Configuration (Sample)
+# CottenpickDNS Go Server Configuration (Sample)
 # This sample is written for the current Go server implementation.
 # Comments below describe the real Go code paths, not the legacy Python server.
 # ==============================================================================
@@ -218,8 +218,18 @@ FORWARD_PORT = 0
 # 3 = AES-128-GCM
 # 4 = AES-192-GCM
 # 5 = AES-256-GCM
-# Must match the client.
+# This is the method the server tries FIRST. With ENCRYPTION_AUTO_DETECT = true
+# (default) the server still accepts clients using any other method on the same
+# shared key, so it need not exactly match the client.
 DATA_ENCRYPTION_METHOD = 1
+
+# Encryption-method auto-detection. When true (default), the server builds a
+# codec for every method from the shared key and detects which one each client
+# used by trying to decrypt (authenticated AES-GCM methods are tried first, so
+# they can never be mis-detected). This lets a client change DATA_ENCRYPTION_METHOD
+# without reconfiguring the server. Set false to accept only DATA_ENCRYPTION_METHOD
+# (slightly less CPU per packet, no auto-adaptation).
+ENCRYPTION_AUTO_DETECT = true
 
 # Relative or absolute path to the encryption key file.
 ENCRYPTION_KEY_FILE = "encrypt_key.txt"

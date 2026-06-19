@@ -23,3 +23,10 @@ logs/
 build/
 .gocache
 .bench/
+
+# OpenCode tooling artifacts
+.opencode/
+
+# stray local build outputs
+client.exe
+server.exe

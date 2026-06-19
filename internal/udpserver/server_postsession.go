@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -11,11 +11,11 @@ import (
 	"context"
 	"time"
 
-	"stormdns-go/internal/arq"
-	Enums "stormdns-go/internal/enums"
-	"stormdns-go/internal/logger"
-	SocksProto "stormdns-go/internal/socksproto"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/logger"
+	SocksProto "cottenpickdns-go/internal/socksproto"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 type deferredDispatchResult uint8

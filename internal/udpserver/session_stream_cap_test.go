@@ -1,7 +1,7 @@
 // ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -10,7 +10,7 @@ package udpserver
 import (
 	"testing"
 
-	"stormdns-go/internal/arq"
+	"cottenpickdns-go/internal/arq"
 )
 
 func TestGetOrCreateStreamEnforcesMaxStreamsPerSession(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/config"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/config"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 func TestSupportsSOCKS4Policy(t *testing.T) {

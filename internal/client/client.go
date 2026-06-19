@@ -1,10 +1,10 @@
-﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// ==============================================================================
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic and initialization for the StormDNS client.
+// Package client provides the core logic and initialization for the CottenpickDNS client.
 // This file (client.go) defines the main Client struct and bootstrapping process.
 // ==============================================================================
 package client
@@ -19,15 +19,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"stormdns-go/internal/arq"
-	"stormdns-go/internal/config"
-	dnsCache "stormdns-go/internal/dnscache"
-	Enums "stormdns-go/internal/enums"
-	fragmentStore "stormdns-go/internal/fragmentstore"
-	"stormdns-go/internal/logger"
-	"stormdns-go/internal/mlq"
-	"stormdns-go/internal/security"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	"cottenpickdns-go/internal/config"
+	dnsCache "cottenpickdns-go/internal/dnscache"
+	Enums "cottenpickdns-go/internal/enums"
+	fragmentStore "cottenpickdns-go/internal/fragmentstore"
+	"cottenpickdns-go/internal/logger"
+	"cottenpickdns-go/internal/mlq"
+	"cottenpickdns-go/internal/security"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 const (
@@ -59,13 +59,22 @@ type Client struct {
 	recheckConnectionFn func(conn *Connection) bool
 
 	// MTU States
-	syncedUploadMTU                       int
-	syncedDownloadMTU                     int
-	syncedUploadChars                     int
-	safeUploadMTU                         int
-	maxPackedBlocks                       int
-	uploadCompression                     uint8
-	downloadCompression                   uint8
+	syncedUploadMTU     int
+	syncedDownloadMTU   int
+	syncedUploadChars   int
+	safeUploadMTU       int
+	maxPackedBlocks     int
+	uploadCompression   uint8
+	downloadCompression uint8
+
+	// queryTypes is the validated set of DNS record types to rotate tunnel
+	// queries over (A1). Always non-empty; queryTypeCursor drives round-robin
+	// selection across it. A single-element set means "always that type".
+	queryTypes      []uint16
+	queryTypeCursor atomic.Uint32
+
+	// dupPreferDistinctDomains enables A6 domain-diverse packet duplication.
+	dupPreferDistinctDomains              bool
 	mtuCryptoOverhead                     int
 	mtuProbeCounter                       atomic.Uint32
 	mtuTestRetries                        int
@@ -211,7 +220,7 @@ func Bootstrap(configPath string, overrides config.ClientConfigOverrides) (*Clie
 	}
 	cfg.ApplyStartupModeMTU("resolvers")
 
-	log := logger.New("StormDNS Client", cfg.LogLevel)
+	log := logger.New("CottenpickDNS Client", cfg.LogLevel)
 
 	codec, err := security.NewCodec(cfg.DataEncryptionMethod, cfg.EncryptionKey)
 	if err != nil {
@@ -260,7 +269,7 @@ func BootstrapFromLogs(configPath string, entries []ResolverCacheEntry, override
 	}
 	cfg.ApplyStartupModeMTU("logs")
 
-	log := logger.New("StormDNS Client", cfg.LogLevel)
+	log := logger.New("CottenpickDNS Client", cfg.LogLevel)
 
 	codec, err := security.NewCodec(cfg.DataEncryptionMethod, cfg.EncryptionKey)
 	if err != nil {
@@ -319,16 +328,18 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 	}
 
 	c := &Client{
-		cfg:                 cfg,
-		log:                 log,
-		codec:               codec,
-		balancer:            NewBalancer(cfg.ResolverBalancingStrategy),
-		uploadCompression:   uint8(cfg.UploadCompressionType),
-		downloadCompression: uint8(cfg.DownloadCompressionType),
-		mtuCryptoOverhead:   mtuCryptoOverhead(cfg.DataEncryptionMethod),
-		maxPackedBlocks:     1,
-		responseMode:        responseMode,
-		connectionsByKey:    make(map[string]int, len(cfg.Domains)*len(cfg.Resolvers)),
+		cfg:                      cfg,
+		log:                      log,
+		codec:                    codec,
+		balancer:                 NewBalancer(cfg.ResolverBalancingStrategy),
+		uploadCompression:        uint8(cfg.UploadCompressionType),
+		downloadCompression:      uint8(cfg.DownloadCompressionType),
+		mtuCryptoOverhead:        mtuCryptoOverhead(cfg.DataEncryptionMethod),
+		maxPackedBlocks:          1,
+		queryTypes:               normalizeRuntimeQueryTypes(cfg.QueryTypeCodes),
+		dupPreferDistinctDomains: cfg.DuplicationPreferDistinctDomains,
+		responseMode:             responseMode,
+		connectionsByKey:         make(map[string]int, len(cfg.Domains)*len(cfg.Resolvers)),
 		udpBufferPool: sync.Pool{
 			New: func() any {
 				return make([]byte, RuntimeUDPReadBufferSize)

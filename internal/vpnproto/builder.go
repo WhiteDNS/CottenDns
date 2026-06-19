@@ -1,13 +1,13 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
 package vpnproto
 
-import "stormdns-go/internal/security"
+import "cottenpickdns-go/internal/security"
 
 type BuildOptions struct {
 	SessionID       uint8

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# StormDNS Client Linux Installer
+# CottenpickDNS Client Linux Installer
 #
 # Run this script from the directory where the release archive was extracted.
-# It installs the StormDNS client as a systemd service so it starts on boot.
+# It installs the CottenpickDNS client as a systemd service so it starts on boot.
 # No internet access is required; all files are taken from the current directory.
 #
 # Usage:
@@ -50,46 +50,46 @@ log_info "Installation directory: $INSTALL_DIR"
 cd "$INSTALL_DIR" || log_error "Cannot access install directory: $INSTALL_DIR"
 
 echo -e "${MAGENTA}${BOLD}"
-echo -e "          StormDNS Client Auto-Installer${NC}"
+echo -e "          CottenpickDNS Client Auto-Installer${NC}"
 echo -e "${CYAN}------------------------------------------------------${NC}"
 
 require_cmd systemctl
 
-stop_existing_stormdns_client_service() {
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^stormdns-client\.service'; then
-    log_info "Stopping existing StormDNS client service..."
-    systemctl stop stormdns-client 2>/dev/null || true
+stop_existing_cottenpickdns_client_service() {
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns-client\.service'; then
+    log_info "Stopping existing CottenpickDNS client service..."
+    systemctl stop cottenpickdns-client 2>/dev/null || true
 
     for _ in 1 2 3 4 5; do
-      if ! systemctl is-active --quiet stormdns-client; then
+      if ! systemctl is-active --quiet cottenpickdns-client; then
         break
       fi
       sleep 1
     done
 
     local main_pid
-    main_pid="$(systemctl show stormdns-client --property MainPID --value 2>/dev/null || true)"
+    main_pid="$(systemctl show cottenpickdns-client --property MainPID --value 2>/dev/null || true)"
     if [[ -n "${main_pid:-}" && "$main_pid" != "0" ]] && kill -0 "$main_pid" 2>/dev/null; then
-      log_warn "stormdns-client service is still active. Sending SIGTERM to MainPID: $main_pid"
+      log_warn "cottenpickdns-client service is still active. Sending SIGTERM to MainPID: $main_pid"
       kill "$main_pid" 2>/dev/null || true
       sleep 2
       kill -0 "$main_pid" 2>/dev/null && kill -9 "$main_pid" 2>/dev/null || true
     fi
 
-    systemctl reset-failed stormdns-client 2>/dev/null || true
+    systemctl reset-failed cottenpickdns-client 2>/dev/null || true
   fi
 }
 
-log_header "Stopping Existing StormDNS Client"
-stop_existing_stormdns_client_service
+log_header "Stopping Existing CottenpickDNS Client"
+stop_existing_cottenpickdns_client_service
 
 log_header "Locating Client Binary"
 # The installer is bundled inside the release archive alongside the binary.
-# Find the most recently modified StormDNS_Client_* file in the current directory.
+# Find the most recently modified CottenpickDNS_Client_* file in the current directory.
 shopt -s nullglob
-client_bins=(StormDNS_Client_*)
+client_bins=(CottenpickDNS_Client_*)
 shopt -u nullglob
-[[ ${#client_bins[@]} -eq 0 ]] && log_error "No StormDNS_Client_* binary found in $INSTALL_DIR. Run this script from the extracted release directory."
+[[ ${#client_bins[@]} -eq 0 ]] && log_error "No CottenpickDNS_Client_* binary found in $INSTALL_DIR. Run this script from the extracted release directory."
 EXECUTABLE="${client_bins[0]}"
 log_info "Found binary: $EXECUTABLE"
 chmod +x "$EXECUTABLE"
@@ -130,10 +130,10 @@ if grep -q '^STARTUP_MODE[[:space:]]*=[[:space:]]*"ask"' client_config.toml; the
 fi
 
 log_header "Installing System Service"
-SVC="/etc/systemd/system/stormdns-client.service"
+SVC="/etc/systemd/system/cottenpickdns-client.service"
 cat > "$SVC" <<EOF
 [Unit]
-Description=StormDNS Client
+Description=CottenpickDNS Client
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -157,27 +157,27 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable stormdns-client >/dev/null 2>&1 || log_warn "Could not enable stormdns-client service at boot."
-systemctl restart stormdns-client
+systemctl enable cottenpickdns-client >/dev/null 2>&1 || log_warn "Could not enable cottenpickdns-client service at boot."
+systemctl restart cottenpickdns-client
 
 sleep 2
-if ! systemctl is-active --quiet stormdns-client; then
-  journalctl -u stormdns-client -n 50 --no-pager || true
+if ! systemctl is-active --quiet cottenpickdns-client; then
+  journalctl -u cottenpickdns-client -n 50 --no-pager || true
   log_error "Service failed to start. See logs above."
 fi
 
-log_success "StormDNS client service is running."
+log_success "CottenpickDNS client service is running."
 
 echo -e "\n${CYAN}======================================================${NC}"
 echo -e " ${GREEN}${BOLD}       INSTALLATION COMPLETED SUCCESSFULLY!${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo -e "${BOLD}Commands:${NC}"
-echo -e "  ${YELLOW}>${NC} Start:   systemctl start stormdns-client"
-echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop stormdns-client"
-echo -e "  ${YELLOW}>${NC} Restart: systemctl restart stormdns-client"
-echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u stormdns-client -f"
+echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottenpickdns-client"
+echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottenpickdns-client"
+echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottenpickdns-client"
+echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottenpickdns-client -f"
 echo -e "\n${BOLD}Files:${NC}"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/client_config.toml"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/client_resolvers.txt"
 echo -e "${YELLOW}Note:${NC} Edit client_config.toml (set DOMAINS, ENCRYPTION_KEY, etc.) then run:"
-echo -e "  ${YELLOW}>${NC} systemctl restart stormdns-client"
+echo -e "  ${YELLOW}>${NC} systemctl restart cottenpickdns-client"

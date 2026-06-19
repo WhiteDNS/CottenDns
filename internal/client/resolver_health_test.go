@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/config"
+	"cottenpickdns-go/internal/config"
 )
 
 func waitForResolverHealthCondition(t *testing.T, timeout time.Duration, cond func() bool, message string) {

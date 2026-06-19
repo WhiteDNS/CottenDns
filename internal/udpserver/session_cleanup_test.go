@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
-// StormDNS
-// Author: nullroute1970
-// Github: https://github.com/nullroute1970/StormDNS
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
 // Year: 2026
 // ==============================================================================
 
@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"stormdns-go/internal/arq"
-	"stormdns-go/internal/config"
-	Enums "stormdns-go/internal/enums"
-	fragmentStore "stormdns-go/internal/fragmentstore"
-	"stormdns-go/internal/mlq"
-	VpnProto "stormdns-go/internal/vpnproto"
+	"cottenpickdns-go/internal/arq"
+	"cottenpickdns-go/internal/config"
+	Enums "cottenpickdns-go/internal/enums"
+	fragmentStore "cottenpickdns-go/internal/fragmentstore"
+	"cottenpickdns-go/internal/mlq"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 type testReadWriteCloser struct {

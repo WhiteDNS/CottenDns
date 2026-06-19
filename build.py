@@ -47,7 +47,7 @@ def build(goos, goarch, goarm, component, output_name, require_cgo=False):
             return "skipped"
     
     version = get_version()
-    ldflags = f"-s -w -X stormdns-go/internal/version.BuildVersion={version}"
+    ldflags = f"-s -w -X cottenpickdns-go/internal/version.BuildVersion={version}"
     
     cmd = [
         "go", "build",
@@ -82,7 +82,7 @@ def main():
     
     for t in targets:
         for component in ["client", "server"]:
-            output_name = f"dist/StormDNS_{component.capitalize()}_{t['platform']}_{t['arch']}{t['ext']}"
+            output_name = f"dist/CottenpickDNS_{component.capitalize()}_{t['platform']}_{t['arch']}{t['ext']}"
             result = build(
                 t["os"],
                 t["arch"],

@@ -26,3 +26,45 @@ jobs:
 
       - name: Run Tests
         run: go test ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # End-to-end smoke test: builds the real client/server binaries and runs
+      # a payload through the live tunnel, asserting byte-for-byte delivery.
+      # Gated behind the `e2e` build tag so it stays out of the unit-test job.
+      - name: Run E2E tunnel test
+        run: go test -tags e2e -timeout 180s ./test/e2e/
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      # Non-blocking for now: surfaces staticcheck findings without failing the
+      # build. Promote to a required check (remove continue-on-error) once a
+      # clean run is confirmed in CI.
+      - name: staticcheck
+        continue-on-error: true
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...

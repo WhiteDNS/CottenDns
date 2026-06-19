@@ -61,32 +61,32 @@ select_release_artifact() {
 
   local base_url
   if [[ -n "$version" ]]; then
-    base_url="https://github.com/nullroute1970/StormDNS/releases/download/${version}"
-    log_info "Targeting StormDNS release: ${version}"
+    base_url="https://github.com/TaJirax/cottenpickDNS/releases/download/${version}"
+    log_info "Targeting CottenpickDNS release: ${version}"
   else
-    base_url="https://github.com/nullroute1970/StormDNS/releases/latest/download"
+    base_url="https://github.com/TaJirax/cottenpickDNS/releases/latest/download"
   fi
 
   case "$arch" in
     aarch64|arm64)
       if [[ $legacy -eq 1 ]]; then
-        PREFIX="StormDNS_Server_Linux-Legacy_ARM64"
+        PREFIX="CottenpickDNS_Server_Linux-Legacy_ARM64"
       else
-        PREFIX="StormDNS_Server_Linux_ARM64"
+        PREFIX="CottenpickDNS_Server_Linux_ARM64"
       fi
       ;;
     armv7l|armv7|armhf)
-      PREFIX="StormDNS_Server_Linux_ARMV7"
+      PREFIX="CottenpickDNS_Server_Linux_ARMV7"
       ;;
     x86_64|amd64)
       if [[ $legacy -eq 1 ]]; then
-        PREFIX="StormDNS_Server_Linux-Legacy_AMD64"
+        PREFIX="CottenpickDNS_Server_Linux-Legacy_AMD64"
       else
-        PREFIX="StormDNS_Server_Linux_AMD64"
+        PREFIX="CottenpickDNS_Server_Linux_AMD64"
       fi
       ;;
     i386|i486|i586|i686|x86)
-      PREFIX="StormDNS_Server_Linux_X86"
+      PREFIX="CottenpickDNS_Server_Linux_X86"
       ;;
     *)
       log_error "Unsupported architecture: $arch"
@@ -112,7 +112,7 @@ find_local_server_binary() {
   for sd in "${search_dirs[@]}"; do
     [[ -d "$sd" ]] || continue
     local found
-    found="$(find "$sd" -maxdepth 1 -name "StormDNS_Server_Linux*" -type f 2>/dev/null | grep -E "$pat" | xargs ls -t 2>/dev/null | head -n1)"
+    found="$(find "$sd" -maxdepth 1 -name "CottenpickDNS_Server_Linux*" -type f 2>/dev/null | grep -E "$pat" | xargs ls -t 2>/dev/null | head -n1)"
     if [[ -n "$found" ]]; then
       echo "$found"
       return 0
@@ -142,35 +142,35 @@ find_local_config() {
 
 print_usage() {
   cat <<'USAGE'
-StormDNS Server Linux Installer
+CottenpickDNS Server Linux Installer
 
 Usage:
-  bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh) [OPTIONS]
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) [OPTIONS]
 
 Options:
-  -v, --version <VERSION>   Install a specific StormDNS release (tag), e.g. v1.2.3.
+  -v, --version <VERSION>   Install a specific CottenpickDNS release (tag), e.g. v1.2.3.
                             If omitted, the latest release is installed.
   -l, --local               Local/offline install: use the server binary and
                             config found in the current directory (or dist/).
                             No download from GitHub is performed.
-  -u, --uninstall           Uninstall StormDNS: stop and remove the systemd
+  -u, --uninstall           Uninstall CottenpickDNS: stop and remove the systemd
                             service, drop kernel/limit tunings, and clean up
                             binaries and config files in the install directory.
   -h, --help                Show this help message and exit.
 
 Examples:
   # Install the latest release (default behavior):
-  bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh)
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
 
   # Install a specific release version:
-  bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh) --version v1.2.3
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --version v1.2.3
 
   # Local/offline install for testing:
   python build.py
   sudo bash server_linux_install.sh --local
 
-  # Uninstall StormDNS:
-  bash <(curl -Ls https://raw.githubusercontent.com/nullroute1970/StormDNS/main/server_linux_install.sh) --uninstall
+  # Uninstall CottenpickDNS:
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --uninstall
 USAGE
 }
 
@@ -248,43 +248,43 @@ fi
 
 echo -e "${MAGENTA}${BOLD}"
 if [[ "$ACTION" == "uninstall" ]]; then
-  echo -e "          StormDNS Server Auto-Uninstaller${NC}"
+  echo -e "          CottenpickDNS Server Auto-Uninstaller${NC}"
 elif [[ "$LOCAL_MODE" -eq 1 ]]; then
-  echo -e "          StormDNS Server Local-Installer${NC}"
+  echo -e "          CottenpickDNS Server Local-Installer${NC}"
 else
-  echo -e "           StormDNS Server Auto-Installer${NC}"
+  echo -e "           CottenpickDNS Server Auto-Installer${NC}"
 fi
 echo -e "${CYAN}------------------------------------------------------${NC}"
 
 do_uninstall() {
-  log_header "Uninstalling StormDNS"
+  log_header "Uninstalling CottenpickDNS"
 
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^stormdns\.service'; then
-    log_info "Stopping and disabling stormdns service..."
-    systemctl stop stormdns 2>/dev/null || true
-    systemctl disable stormdns >/dev/null 2>&1 || true
-    systemctl reset-failed stormdns 2>/dev/null || true
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns\.service'; then
+    log_info "Stopping and disabling cottenpickdns service..."
+    systemctl stop cottenpickdns 2>/dev/null || true
+    systemctl disable cottenpickdns >/dev/null 2>&1 || true
+    systemctl reset-failed cottenpickdns 2>/dev/null || true
   else
-    log_info "No stormdns systemd unit found."
+    log_info "No cottenpickdns systemd unit found."
   fi
 
-  if [[ -f /etc/systemd/system/stormdns.service ]]; then
-    rm -f /etc/systemd/system/stormdns.service
-    log_success "Removed /etc/systemd/system/stormdns.service"
+  if [[ -f /etc/systemd/system/cottenpickdns.service ]]; then
+    rm -f /etc/systemd/system/cottenpickdns.service
+    log_success "Removed /etc/systemd/system/cottenpickdns.service"
   fi
-  if [[ -f /etc/systemd/system/stormdns-egress-filter.service ]]; then
-    systemctl stop stormdns-egress-filter.service 2>/dev/null || true
-    systemctl disable stormdns-egress-filter.service >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/stormdns-egress-filter.service
-    log_success "Removed /etc/systemd/system/stormdns-egress-filter.service"
+  if [[ -f /etc/systemd/system/cottenpickdns-egress-filter.service ]]; then
+    systemctl stop cottenpickdns-egress-filter.service 2>/dev/null || true
+    systemctl disable cottenpickdns-egress-filter.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/cottenpickdns-egress-filter.service
+    log_success "Removed /etc/systemd/system/cottenpickdns-egress-filter.service"
   fi
-  if [[ -d /etc/systemd/system/stormdns.service.d ]]; then
-    rm -rf /etc/systemd/system/stormdns.service.d
-    log_success "Removed /etc/systemd/system/stormdns.service.d/"
+  if [[ -d /etc/systemd/system/cottenpickdns.service.d ]]; then
+    rm -rf /etc/systemd/system/cottenpickdns.service.d
+    log_success "Removed /etc/systemd/system/cottenpickdns.service.d/"
   fi
-  if [[ -f /usr/local/sbin/stormdns-egress-filter.sh ]]; then
-    rm -f /usr/local/sbin/stormdns-egress-filter.sh
-    log_success "Removed /usr/local/sbin/stormdns-egress-filter.sh"
+  if [[ -f /usr/local/sbin/cottenpickdns-egress-filter.sh ]]; then
+    rm -f /usr/local/sbin/cottenpickdns-egress-filter.sh
+    log_success "Removed /usr/local/sbin/cottenpickdns-egress-filter.sh"
   fi
   systemctl daemon-reload 2>/dev/null || true
 
@@ -292,29 +292,29 @@ do_uninstall() {
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
     cmdline="$(ps -p "$pid" -o cmd= 2>/dev/null || true)"
-    if echo "$cmdline" | grep -qiE 'stormdns'; then
-      log_warn "Terminating stray StormDNS process (PID: $pid)..."
+    if echo "$cmdline" | grep -qiE 'cottenpickdns'; then
+      log_warn "Terminating stray CottenpickDNS process (PID: $pid)..."
       kill "$pid" 2>/dev/null || true
       sleep 1
       if kill -0 "$pid" 2>/dev/null; then
         kill -9 "$pid" 2>/dev/null || true
       fi
     fi
-  done < <(pgrep -fi 'stormdns' 2>/dev/null || true)
+  done < <(pgrep -fi 'cottenpickdns' 2>/dev/null || true)
 
-  if [[ -f /etc/sysctl.d/99-stormdns.conf ]]; then
-    rm -f /etc/sysctl.d/99-stormdns.conf
+  if [[ -f /etc/sysctl.d/99-cottenpickdns.conf ]]; then
+    rm -f /etc/sysctl.d/99-cottenpickdns.conf
     sysctl --system >/dev/null 2>&1 || true
-    log_success "Removed kernel tuning (/etc/sysctl.d/99-stormdns.conf)."
+    log_success "Removed kernel tuning (/etc/sysctl.d/99-cottenpickdns.conf)."
   fi
-  if [[ -f /etc/sysctl.d/99-stormdns-tuning.conf ]]; then
-    rm -f /etc/sysctl.d/99-stormdns-tuning.conf
+  if [[ -f /etc/sysctl.d/99-cottenpickdns-tuning.conf ]]; then
+    rm -f /etc/sysctl.d/99-cottenpickdns-tuning.conf
     sysctl --system >/dev/null 2>&1 || true
-    log_success "Removed supplementary kernel tuning (/etc/sysctl.d/99-stormdns-tuning.conf)."
+    log_success "Removed supplementary kernel tuning (/etc/sysctl.d/99-cottenpickdns-tuning.conf)."
   fi
-  if [[ -f /etc/security/limits.d/99-stormdns.conf ]]; then
-    rm -f /etc/security/limits.d/99-stormdns.conf
-    log_success "Removed file descriptor limits (/etc/security/limits.d/99-stormdns.conf)."
+  if [[ -f /etc/security/limits.d/99-cottenpickdns.conf ]]; then
+    rm -f /etc/security/limits.d/99-cottenpickdns.conf
+    log_success "Removed file descriptor limits (/etc/security/limits.d/99-cottenpickdns.conf)."
   fi
 
   if [[ -f /etc/systemd/resolved.conf.bak && -f /etc/systemd/resolved.conf ]]; then
@@ -328,7 +328,7 @@ do_uninstall() {
   shopt -s nullglob
   local removed=0
   for f in \
-    "$INSTALL_DIR"/StormDNS_Server_Linux* \
+    "$INSTALL_DIR"/CottenpickDNS_Server_Linux* \
     "$INSTALL_DIR"/server_config.toml \
     "$INSTALL_DIR"/server_config.toml.backup \
     "$INSTALL_DIR"/server_config.toml.bak \
@@ -344,7 +344,7 @@ do_uninstall() {
   done
   shopt -u nullglob
   if [[ $removed -eq 0 ]]; then
-    log_warn "No StormDNS files found in $INSTALL_DIR. If you installed elsewhere, run the uninstaller from that directory."
+    log_warn "No CottenpickDNS files found in $INSTALL_DIR. If you installed elsewhere, run the uninstaller from that directory."
   fi
 
   echo -e "\n${CYAN}======================================================${NC}"
@@ -541,38 +541,38 @@ remove_port53_forward_rules() {
   remove_nft_port53_redirects
 }
 
-stop_existing_stormdns_service() {
+stop_existing_cottenpickdns_service() {
   local unit_present=0
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^stormdns\.service'; then
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns\.service'; then
     unit_present=1
-    log_info "Stopping existing StormDNS service..."
-    systemctl stop stormdns 2>/dev/null || true
+    log_info "Stopping existing CottenpickDNS service..."
+    systemctl stop cottenpickdns 2>/dev/null || true
 
     for _ in 1 2 3 4 5; do
-      if ! systemctl is-active --quiet stormdns; then
+      if ! systemctl is-active --quiet cottenpickdns; then
         break
       fi
       sleep 1
     done
 
     local main_pid
-    main_pid="$(systemctl show stormdns --property MainPID --value 2>/dev/null || true)"
+    main_pid="$(systemctl show cottenpickdns --property MainPID --value 2>/dev/null || true)"
     if [[ -n "${main_pid:-}" && "$main_pid" != "0" ]] && kill -0 "$main_pid" 2>/dev/null; then
-      log_warn "stormdns service is still active. Trying to terminate MainPID: $main_pid"
+      log_warn "cottenpickdns service is still active. Trying to terminate MainPID: $main_pid"
       terminate_port53_pid "$main_pid" || true
     fi
 
-    systemctl stop stormdns 2>/dev/null || true
-    systemctl reset-failed stormdns 2>/dev/null || true
+    systemctl stop cottenpickdns 2>/dev/null || true
+    systemctl reset-failed cottenpickdns 2>/dev/null || true
   fi
 
   local pid cmdline killed=0
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
     cmdline="$(ps -p "$pid" -o cmd= 2>/dev/null || true)"
-    if echo "$cmdline" | grep -qiE 'stormdns|stormdns_server'; then
+    if echo "$cmdline" | grep -qiE 'cottenpickdns|cottenpickdns_server'; then
       if [[ $killed -eq 0 && $unit_present -eq 0 ]]; then
-        log_info "Stopping existing StormDNS process that was started outside systemd..."
+        log_info "Stopping existing CottenpickDNS process that was started outside systemd..."
       fi
       terminate_port53_pid "$pid" || true
       killed=1
@@ -580,8 +580,8 @@ stop_existing_stormdns_service() {
   done <<< "$(get_port53_pids)"
 }
 
-log_header "Stopping Existing StormDNS"
-stop_existing_stormdns_service
+log_header "Stopping Existing CottenpickDNS"
+stop_existing_cottenpickdns_service
 
 log_header "Managing Network Ports (Port 53)"
 remove_port53_forward_rules
@@ -684,8 +684,8 @@ fi
 log_info "Detected firewall handling: ${ACTIVE_FIREWALL}"
 
 log_header "Tuning Kernel & Limits"
-cat > /etc/sysctl.d/99-stormdns.conf <<'EOF'
-# StormDNS high-load tuning
+cat > /etc/sysctl.d/99-cottenpickdns.conf <<'EOF'
+# CottenpickDNS high-load tuning
 fs.file-max = 2097152
 fs.nr_open = 2097152
 net.core.somaxconn = 65535
@@ -705,8 +705,8 @@ net.ipv4.ip_local_port_range = 10240 65535
 EOF
 sysctl --system >/dev/null 2>&1 || log_warn "Could not fully apply sysctl settings."
 
-cat > /etc/sysctl.d/99-stormdns-tuning.conf <<'EOF'
-# StormDNS performance tuning (supplementary)
+cat > /etc/sysctl.d/99-cottenpickdns-tuning.conf <<'EOF'
+# CottenpickDNS performance tuning (supplementary)
 fs.file-max = 2097152
 fs.nr_open = 2097152
 net.core.rmem_max = 33554432
@@ -719,7 +719,7 @@ net.ipv4.ip_local_port_range = 10240 65535
 EOF
 sysctl --system >/dev/null 2>&1 || log_warn "Some supplementary sysctl values may not have applied."
 
-cat > /etc/security/limits.d/99-stormdns.conf <<'EOF'
+cat > /etc/security/limits.d/99-cottenpickdns.conf <<'EOF'
 * soft nofile 1048576
 * hard nofile 1048576
 root soft nofile 1048576
@@ -732,7 +732,7 @@ if [[ "$LOCAL_MODE" -eq 1 ]]; then
   ARCH="$(uname -m)"
 
   LOCAL_BIN="$(find_local_server_binary "$ARCH")"
-  [[ -z "$LOCAL_BIN" ]] && log_error "No StormDNS server binary found. Run 'python build.py' first."
+  [[ -z "$LOCAL_BIN" ]] && log_error "No CottenpickDNS server binary found. Run 'python build.py' first."
   log_info "Found binary: $LOCAL_BIN"
 
   LOCAL_BIN_DIR="$(dirname "$LOCAL_BIN")"
@@ -773,8 +773,8 @@ else
   log_info "Downloading server binaries..."
   require_cmd curl
   require_cmd unzip
-  if ! DOWNLOAD_DIR="$(mktemp -d /tmp/stormdns_download.XXXXXX 2>/dev/null)"; then
-    DOWNLOAD_DIR="$(mktemp -d "$INSTALL_DIR/stormdns_download.XXXXXX" 2>/dev/null || true)"
+  if ! DOWNLOAD_DIR="$(mktemp -d /tmp/cottenpickdns_download.XXXXXX 2>/dev/null)"; then
+    DOWNLOAD_DIR="$(mktemp -d "$INSTALL_DIR/cottenpickdns_download.XXXXXX" 2>/dev/null || true)"
   fi
   [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]] || log_error "Failed to create temporary download directory. Check free space and /tmp permissions."
   ZIP_PATH="${DOWNLOAD_DIR}/server.zip"
@@ -857,7 +857,7 @@ echo -e "  YOUR ENCRYPTION KEY: ${NC}${CYAN}$(cat encrypt_key.txt 2>/dev/null)${
 echo -e "${GREEN}${BOLD}------------------------------------------------------${NC}"
 
 log_header "Installing Egress Filter (Block Outbound TCP/53)"
-cat > /usr/local/sbin/stormdns-egress-filter.sh <<'FILTER'
+cat > /usr/local/sbin/cottenpickdns-egress-filter.sh <<'FILTER'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -871,17 +871,17 @@ if command -v ip6tables >/dev/null 2>&1; then
   ip6tables -I OUTPUT 1 -p tcp --dport 53 -j REJECT --reject-with tcp-reset || true
 fi
 FILTER
-chmod +x /usr/local/sbin/stormdns-egress-filter.sh
+chmod +x /usr/local/sbin/cottenpickdns-egress-filter.sh
 
-cat > /etc/systemd/system/stormdns-egress-filter.service <<'SERVICE'
+cat > /etc/systemd/system/cottenpickdns-egress-filter.service <<'SERVICE'
 [Unit]
-Description=StormDNS egress filter - reject outbound TCP/53
+Description=CottenpickDNS egress filter - reject outbound TCP/53
 After=network.target
-Before=stormdns.service
+Before=cottenpickdns.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/stormdns-egress-filter.sh
+ExecStart=/usr/local/sbin/cottenpickdns-egress-filter.sh
 RemainAfterExit=yes
 
 [Install]
@@ -891,10 +891,10 @@ SERVICE
 log_success "Egress filter installed."
 
 log_header "Installing System Service"
-SVC="/etc/systemd/system/stormdns.service"
+SVC="/etc/systemd/system/cottenpickdns.service"
 cat > "$SVC" <<EOF
 [Unit]
-Description=StormDNS Server
+Description=CottenpickDNS Server
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -919,16 +919,16 @@ EOF
 
 systemctl daemon-reload
 
-mkdir -p /etc/systemd/system/stormdns.service.d
+mkdir -p /etc/systemd/system/cottenpickdns.service.d
 
-cat > /etc/systemd/system/stormdns.service.d/10-stormdns-tuning.conf <<'DROPIN'
+cat > /etc/systemd/system/cottenpickdns.service.d/10-cottenpickdns-tuning.conf <<'DROPIN'
 [Unit]
-Wants=stormdns-egress-filter.service
-After=stormdns-egress-filter.service
+Wants=cottenpickdns-egress-filter.service
+After=cottenpickdns-egress-filter.service
 DROPIN
 
 systemctl daemon-reload
-systemctl enable --now stormdns-egress-filter.service
+systemctl enable --now cottenpickdns-egress-filter.service
 
 log_success "Egress filter enabled."
 
@@ -938,19 +938,19 @@ ss -K state close-wait dport = :53 >/dev/null 2>&1 || true
 ss -6 -K state syn-sent dport = :53 >/dev/null 2>&1 || true
 ss -6 -K state close-wait dport = :53 >/dev/null 2>&1 || true
 
-systemctl enable stormdns >/dev/null 2>&1
-systemctl restart stormdns
+systemctl enable cottenpickdns >/dev/null 2>&1
+systemctl restart cottenpickdns
 
-if ! systemctl is-active --quiet stormdns; then
-  journalctl -u stormdns -n 50 --no-pager || true
+if ! systemctl is-active --quiet cottenpickdns; then
+  journalctl -u cottenpickdns -n 50 --no-pager || true
   log_error "Service failed to start. See logs above."
 fi
 
-log_success "StormDNS service is running."
+log_success "CottenpickDNS service is running."
 
 log_info "Cleaning up old server binaries..."
 shopt -s nullglob
-for old_bin in "$INSTALL_DIR"/StormDNS_Server_Linux*; do
+for old_bin in "$INSTALL_DIR"/CottenpickDNS_Server_Linux*; do
   [[ "$(basename "$old_bin")" == "$EXECUTABLE" ]] && continue
   rm -f -- "$old_bin"
   log_info "Removed old binary: $(basename "$old_bin")"
@@ -961,13 +961,13 @@ echo -e "\n${CYAN}======================================================${NC}"
 echo -e " ${GREEN}${BOLD}       INSTALLATION COMPLETED SUCCESSFULLY!${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo -e "${BOLD}Commands:${NC}"
-echo -e "  ${YELLOW}>${NC} Start:   systemctl start stormdns"
-echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop stormdns"
-echo -e "  ${YELLOW}>${NC} Restart: systemctl restart stormdns"
-echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u stormdns -f"
+echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottenpickdns"
+echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottenpickdns"
+echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottenpickdns"
+echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottenpickdns -f"
 echo -e "\n${BOLD}Files:${NC}"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/server_config.toml"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/encrypt_key.txt"
-echo -e "${YELLOW}Final Note:${NC} If config changes, run: systemctl restart stormdns"
+echo -e "${YELLOW}Final Note:${NC} If config changes, run: systemctl restart cottenpickdns"
 
 rm -f *.spec >/dev/null 2>&1 || true

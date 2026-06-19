@@ -1,4 +1,4 @@
-# StormDNS — Agent Guide
+# CottenpickDNS — Agent Guide
 
 ## Target Network
 
