@@ -244,6 +244,10 @@ func buildPacketFlags() [256]uint8 {
 		setValid(packetType)
 	}
 
+	// FEC shards carry a StreamID for routing but no sequence/fragment header
+	// (the recovered data units inside carry their own seq/frag).
+	set(Enums.PACKET_FEC_SHARD, packetFlagStream)
+
 	streamAndSeq := [...]uint8{
 		Enums.PACKET_STREAM_SYN,
 		Enums.PACKET_STREAM_SYN_ACK,

@@ -77,6 +77,11 @@ const (
 	PACKET_SESSION_CLOSE = 0x36 // 54
 	PACKET_SESSION_BUSY  = 0x37 // 55
 
+	// FEC (forward error correction) shard on the download path. Payload is a
+	// framed Reed-Solomon shard; session-scoped with no stream/seq header (the
+	// data units inside the recovered block carry their own stream/seq).
+	PACKET_FEC_SHARD = 0x38 // 56
+
 	// Generic error packets
 	PACKET_ERROR_DROP = 0xFF // 255
 )

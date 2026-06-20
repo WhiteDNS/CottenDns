@@ -14,7 +14,9 @@ import (
 
 	"cottenpickdns-go/internal/arq"
 	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/fec"
 	"cottenpickdns-go/internal/mlq"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 // Stream_server encapsulates an ARQ instance and its transmit queue for a single stream.
@@ -40,6 +42,17 @@ type Stream_server struct {
 	Connected    bool
 	onClosed     func(uint16, time.Time, string)
 	log          arq.Logger
+
+	// Forward error correction (download direction, opt-in). When fecEnc is
+	// non-nil, STREAM_DATA/RESEND popped for this stream are diverted into the
+	// encoder at dequeue time and emitted as PACKET_FEC_SHARD frames instead of
+	// raw data packets; fecShardQueue holds frames waiting for a poll to carry
+	// them. ARQ above is unchanged: it still tracks, dedups and retransmits the
+	// underlying data packets, providing the backstop when a block is lost
+	// beyond recovery. All FEC state is guarded by fecMu.
+	fecMu         sync.Mutex
+	fecEnc        *fec.Encoder
+	fecShardQueue [][]byte
 }
 
 func NewStreamServer(streamID uint16, sessionID uint16, arqConfig arq.Config, localConn io.ReadWriteCloser, mtu int, queueInitialCapacity int, logger arq.Logger) *Stream_server {
@@ -360,4 +373,91 @@ func (s *Stream_server) CloseStream(force bool, ttl time.Duration, reason string
 	}
 
 	s.finalizeAfterARQClose(reason)
+}
+
+// EnableFEC turns on download-direction forward error correction for this
+// stream. It is idempotent: a second call (e.g. from another data-stream entry
+// point) is a no-op so a stream's FEC block numbering is never reset mid-flight.
+func (s *Stream_server) EnableFEC(blockSize, parity int) {
+	if s == nil {
+		return
+	}
+	s.fecMu.Lock()
+	if s.fecEnc == nil {
+		s.fecEnc = fec.NewEncoder(blockSize, parity)
+	}
+	s.fecMu.Unlock()
+}
+
+// FECEnabled reports whether this stream diverts data through FEC.
+func (s *Stream_server) FECEnabled() bool {
+	if s == nil {
+		return false
+	}
+	s.fecMu.Lock()
+	on := s.fecEnc != nil
+	s.fecMu.Unlock()
+	return on
+}
+
+// feedFECData packs a data packet into a FEC unit and buffers it into the
+// encoder, appending any shard frames produced at a block boundary.
+func (s *Stream_server) feedFECData(seq uint16, fragID uint8, payload []byte) {
+	unit := VpnProto.PackFECDataUnit(seq, fragID, payload)
+	s.fecMu.Lock()
+	defer s.fecMu.Unlock()
+	if s.fecEnc == nil {
+		return
+	}
+	frames, err := s.fecEnc.AddPacket(unit)
+	if err != nil {
+		return
+	}
+	s.fecShardQueue = append(s.fecShardQueue, frames...)
+}
+
+// flushFEC emits a short trailing block for whatever data units are buffered,
+// so a paused stream's tail is not stuck below a block boundary.
+func (s *Stream_server) flushFEC() {
+	s.fecMu.Lock()
+	defer s.fecMu.Unlock()
+	if s.fecEnc == nil {
+		return
+	}
+	frames, err := s.fecEnc.Flush()
+	if err != nil {
+		return
+	}
+	s.fecShardQueue = append(s.fecShardQueue, frames...)
+}
+
+// popFECShard returns the next buffered shard frame, or (nil,false) if none.
+func (s *Stream_server) popFECShard() ([]byte, bool) {
+	s.fecMu.Lock()
+	defer s.fecMu.Unlock()
+	if len(s.fecShardQueue) == 0 {
+		return nil, false
+	}
+	frame := s.fecShardQueue[0]
+	s.fecShardQueue = s.fecShardQueue[1:]
+	if len(s.fecShardQueue) == 0 {
+		s.fecShardQueue = nil
+	}
+	return frame, true
+}
+
+// HasBufferedFECWork reports whether this stream still owes FEC output: either
+// queued shard frames or data units buffered in the encoder below a block
+// boundary. The dequeue loop uses it to keep selecting a FEC stream that has no
+// TXQueue entries left but still has a trailing block to flush.
+func (s *Stream_server) HasBufferedFECWork() bool {
+	if s == nil {
+		return false
+	}
+	s.fecMu.Lock()
+	defer s.fecMu.Unlock()
+	if len(s.fecShardQueue) > 0 {
+		return true
+	}
+	return s.fecEnc != nil && s.fecEnc.Buffered() > 0
 }

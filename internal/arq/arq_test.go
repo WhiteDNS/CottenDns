@@ -2358,6 +2358,10 @@ func TestARQ_CheckRetransmitsUsesActualDequeueTime(t *testing.T) {
 
 	a.mu.Lock()
 	a.sndBuf[9].LastSentAt = time.Now().Add(-200 * time.Millisecond)
+	// This white-box backdating bypasses the production paths that move
+	// LastSentAt; clear the retransmit-hint lower bound the same way the real
+	// elapsed-timer recompute would, so checkRetransmits performs a full scan.
+	a.minRetransmitAt = time.Time{}
 	a.mu.Unlock()
 
 	a.checkRetransmits()

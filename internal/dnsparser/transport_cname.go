@@ -81,6 +81,19 @@ func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answ
 		}
 	}
 
+	// NULL channel: the frame rides verbatim in the answer RDATA. Honored by
+	// default whenever the client sends a NULL query.
+	if qType == Enums.DNS_RECORD_TYPE_NULL && len(rawFrame) <= rrChannelMaxFrame {
+		return buildNULLResponsePacket(questionPacket, answerName, rawFrame)
+	}
+
+	// HTTPS / SVCB channel: the frame rides in a service-binding SvcParam value.
+	if qType == Enums.DNS_RECORD_TYPE_HTTPS || qType == Enums.DNS_RECORD_TYPE_SVCB {
+		if _, fits := encodeFrameToSVCBRData(rawFrame); fits {
+			return buildSVCBResponsePacket(questionPacket, answerName, qType, rawFrame)
+		}
+	}
+
 	// Otherwise match with a CNAME (needs the tunnel base domain as suffix).
 	if answerDomain != "" {
 		if target, fits := encodeFrameToCNAMETarget(rawFrame, answerDomain); fits {
@@ -184,6 +197,16 @@ func ExtractVPNResponseMatching(packet []byte, baseEncoded bool, domains []strin
 
 	// A2 supplementary channel: IPv4 A records carrying the frame.
 	if pkt, ok, err := extractARecordFrame(parsed); ok {
+		return pkt, err
+	}
+
+	// NULL channel: raw frame in answer RDATA.
+	if pkt, ok, err := extractNULLFrame(parsed); ok {
+		return pkt, err
+	}
+
+	// HTTPS / SVCB channel: frame inside a service-binding SvcParam.
+	if pkt, ok, err := extractSVCBFrame(parsed); ok {
 		return pkt, err
 	}
 

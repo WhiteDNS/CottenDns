@@ -240,6 +240,23 @@ ENCRYPTION_AUTO_DETECT = true
 # the target networks block IPv6. Default false (off).
 A_RECORD_DATA_DELIVERY = false
 
+# Forward Error Correction on the download path (tier-2 packet-loss reducer).
+# When enabled the server encodes outgoing STREAM_DATA into Reed-Solomon blocks
+# of FEC_BLOCK_SIZE data shards + FEC_PARITY recovery shards and sends them as
+# FEC shard packets instead of raw data; the client reconstructs lost data
+# without a retransmit round-trip. ARQ still runs underneath as the backstop, so
+# this is safe to toggle. Default off (byte-identical to the classic data path).
+#
+# A block survives losing up to FEC_PARITY of its (FEC_BLOCK_SIZE + FEC_PARITY)
+# shards. Rule of thumb for a target loss rate L: pick FEC_PARITY so that
+# FEC_PARITY / (FEC_BLOCK_SIZE + FEC_PARITY) >= L. Examples:
+#   ~50% loss: FEC_BLOCK_SIZE = 4,  FEC_PARITY = 4   (8 shards, lose any 4)
+#   ~75% loss: FEC_BLOCK_SIZE = 4,  FEC_PARITY = 12  (16 shards, lose any 12)
+# FEC_BLOCK_SIZE + FEC_PARITY must be <= 256 (clamped automatically).
+FEC_DOWNLOAD_ENABLED = false
+FEC_BLOCK_SIZE = 4
+FEC_PARITY = 4
+
 # Relative or absolute path to the encryption key file.
 ENCRYPTION_KEY_FILE = "encrypt_key.txt"
 
@@ -303,4 +320,4 @@ LOG_LEVEL = "INFO"
 
 # ------------------------------------------------------------------------------
 
-CONFIG_VERSION = "10"
+CONFIG_VERSION = "11"

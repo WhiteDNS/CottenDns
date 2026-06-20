@@ -20,11 +20,16 @@ DOMAINS = ["v.domain.com"]
 
 # DNS record types the client rotates over when building tunnel queries (A1,
 # anti-fingerprinting). Names are case-insensitive. The tunnel payload always
-# rides in the query name, so any of these work; the server answers TXT queries
-# with TXT and other types with a CNAME (falling back to TXT for large payloads).
+# rides in the query name, so any of these work, and the server auto-accepts
+# every type and answers with a matching record (no server config needed):
+#   TXT   -> TXT chunks (default, highest capacity over recursive resolvers)
+#   NULL  -> raw frame in the answer RDATA (high capacity, direct-resolver path)
+#   HTTPS / SVCB -> frame inside a service-binding SvcParam value
+#   A     -> IPv4 A records when A_RECORD_DATA_DELIVERY is enabled server-side
+#   CNAME and all other types -> CNAME target (falls back to TXT for large frames)
 # Unset / empty = TXT only (historical behavior). Recognized:
-#   TXT, CNAME, A, AAAA, MX, NS, PTR, SRV, SVCB, CAA, NAPTR, SOA, HTTPS
-# Example: QUERY_TYPES = ["TXT", "CNAME", "A", "AAAA"]
+#   TXT, CNAME, A, AAAA, NULL, MX, NS, PTR, SRV, SVCB, CAA, NAPTR, SOA, HTTPS
+# Example: QUERY_TYPES = ["TXT", "CNAME", "NULL", "HTTPS"]
 QUERY_TYPES = ["TXT"]
 
 # When true, the duplicate copies of a packet (see *_PACKET_DUPLICATION_COUNT)

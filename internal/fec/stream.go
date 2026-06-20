@@ -96,6 +96,12 @@ func NewEncoder(blockSize, parity int) *Encoder {
 	return &Encoder{blockSize: blockSize, parity: parity}
 }
 
+// Buffered reports how many data packets are held below the current block
+// boundary (i.e. would be emitted by a Flush). Zero means nothing is pending.
+func (e *Encoder) Buffered() int {
+	return len(e.buf)
+}
+
 // SetParity adjusts the parity-shard count for subsequent blocks (e.g. as the
 // measured loss changes). It takes effect at the next block boundary.
 func (e *Encoder) SetParity(parity int) {

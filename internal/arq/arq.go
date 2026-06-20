@@ -216,6 +216,14 @@ type ARQ struct {
 	flushSignal    chan struct{}
 	rxChan         chan rxPayload
 	pendingInbound int
+
+	// minRetransmitAt is a lower bound on the earliest wall-clock time any
+	// send-buffer item could next require action (RTO retransmit or TTL
+	// expiry). checkRetransmits uses it to skip the full sndBuf scan on ticks
+	// where nothing can be due yet. It is a hint: it is always <= the true
+	// earliest deadline, so now.Before(minRetransmitAt) provably means no item
+	// is actionable. A zero value forces a full scan. Guarded by a.mu.
+	minRetransmitAt time.Time
 }
 
 type closeWriter interface {
@@ -676,6 +684,7 @@ func (a *ARQ) NoteTXPacketDequeued(packetType uint8, sequenceNum uint16, fragmen
 		if info, exists := a.sndBuf[sequenceNum]; exists {
 			info.LastSentAt = now
 			info.Dispatched = true
+			a.minRetransmitAt = time.Time{}
 		}
 	default:
 		if !a.enableControlReliability {
@@ -765,6 +774,7 @@ func (a *ARQ) MarkCloseWriteReceived() {
 		}
 	}
 	a.sndBuf = make(map[uint16]*arqDataItem)
+	a.minRetransmitAt = time.Time{}
 	a.signalWindowNotFull()
 	a.mu.Unlock()
 
@@ -999,6 +1009,7 @@ func (a *ARQ) ioLoop() {
 				CompressionType: a.compressionType,
 				TTL:             0,
 			}
+			a.minRetransmitAt = time.Time{}
 			a.mu.Unlock()
 
 			ok := a.enqueuer.PushTXPacket(
@@ -1012,6 +1023,7 @@ func (a *ARQ) ioLoop() {
 					info.Dispatched = true
 					info.LastSentAt = time.Now().Add(-info.CurrentRTO)
 				}
+				a.minRetransmitAt = time.Time{}
 				a.mu.Unlock()
 			}
 		}
@@ -2122,6 +2134,20 @@ func (a *ARQ) checkRetransmits() {
 		return
 	}
 
+	// Fast path: if a valid lower-bound deadline says nothing in the send
+	// buffer can be due yet, skip the full O(window) scan. Control-plane
+	// retransmits run on their own timeline and are still serviced.
+	a.mu.RLock()
+	hint := a.minRetransmitAt
+	nItems := len(a.sndBuf)
+	a.mu.RUnlock()
+	if nItems > 0 && !hint.IsZero() && now.Before(hint) {
+		if a.enableControlReliability {
+			a.checkControlRetransmits(now)
+		}
+		return
+	}
+
 	a.mu.RLock()
 	var jobs []rtxJob
 	var ttlExpired bool
@@ -2192,9 +2218,38 @@ func (a *ARQ) checkRetransmits() {
 		a.mu.Unlock()
 	}
 
+	a.recomputeRetransmitHint()
+
 	if a.enableControlReliability {
 		a.checkControlRetransmits(now)
 	}
+}
+
+// recomputeRetransmitHint refreshes minRetransmitAt to a lower bound on the
+// earliest time any send-buffer item could next need action: the soonest RTO
+// deadline (LastSentAt+CurrentRTO) over dispatched items, plus the soonest
+// explicit TTL expiry (CreatedAt+TTL). A zero result (empty buffer, or only
+// undispatched non-TTL items) forces the next tick to scan. Called only from
+// the single retransmit goroutine; takes a.mu internally.
+func (a *ARQ) recomputeRetransmitHint() {
+	a.mu.Lock()
+	var minAt time.Time
+	for _, info := range a.sndBuf {
+		if info.Dispatched {
+			due := info.LastSentAt.Add(info.CurrentRTO)
+			if minAt.IsZero() || due.Before(minAt) {
+				minAt = due
+			}
+		}
+		if info.TTL > 0 {
+			ttlAt := info.CreatedAt.Add(info.TTL)
+			if minAt.IsZero() || ttlAt.Before(minAt) {
+				minAt = ttlAt
+			}
+		}
+	}
+	a.minRetransmitAt = minAt
+	a.mu.Unlock()
 }
 
 func (a *ARQ) retransmitPriorityKinds(jobs []rtxJob) []bool {

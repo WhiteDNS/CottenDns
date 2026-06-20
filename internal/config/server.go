@@ -78,6 +78,13 @@ type ServerConfig struct {
 	EncryptionAutoDetect              bool     `toml:"ENCRYPTION_AUTO_DETECT"`
 	ARecordDataDelivery               bool     `toml:"A_RECORD_DATA_DELIVERY"`
 	EncryptionKeyFile                 string   `toml:"ENCRYPTION_KEY_FILE"`
+	// FEC (forward error correction) on the download path (tier 2 loss reducer).
+	// Opt-in; when enabled the server encodes outgoing STREAM_DATA into
+	// Reed-Solomon blocks (FECBlockSize data + FECParity recovery shards) so the
+	// client reconstructs lost data without a retransmit round-trip.
+	FECDownloadEnabled bool `toml:"FEC_DOWNLOAD_ENABLED"`
+	FECBlockSize       int  `toml:"FEC_BLOCK_SIZE"`
+	FECParity          int  `toml:"FEC_PARITY"`
 	LogLevel                          string   `toml:"LOG_LEVEL"`
 	ARQWindowSize                     int      `toml:"ARQ_WINDOW_SIZE"`
 	ARQInitialRTOSeconds              float64  `toml:"ARQ_INITIAL_RTO_SECONDS"`
@@ -376,6 +383,19 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 
 	if cfg.MinVPNLabelLength <= 0 {
 		cfg.MinVPNLabelLength = 3
+	}
+
+	if cfg.FECBlockSize <= 0 {
+		cfg.FECBlockSize = 4
+	}
+	if cfg.FECParity <= 0 {
+		cfg.FECParity = 4
+	}
+	if cfg.FECBlockSize > 200 {
+		cfg.FECBlockSize = 200
+	}
+	if cfg.FECBlockSize+cfg.FECParity > 256 {
+		cfg.FECParity = 256 - cfg.FECBlockSize
 	}
 
 	cfg.SupportedUploadCompressionTypes = normalizeCompressionTypeList(cfg.SupportedUploadCompressionTypes)

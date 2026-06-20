@@ -184,6 +184,7 @@ func (s *Server) queueImmediateControlAck(record *sessionRecord, packet VpnProto
 	if (!exists || stream == nil) && isStreamCreationPacketType(packet.PacketType) {
 		stream = record.getOrCreateStream(packet.StreamID, s.streamARQConfig(record.DownloadCompression), nil, s.log)
 		exists = stream != nil
+		s.maybeEnableStreamFEC(stream)
 	}
 
 	if !exists || stream == nil {

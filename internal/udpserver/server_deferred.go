@@ -125,6 +125,7 @@ func (s *Server) processDeferredStreamSyn(ctx context.Context, vpnPacket VpnProt
 		record.enqueueOrphanReset(Enums.PACKET_STREAM_RST, vpnPacket.StreamID, 0)
 		return
 	}
+	s.maybeEnableStreamFEC(stream)
 
 	stream.mu.RLock()
 	alreadyConnected := stream.Connected && stream.TargetHost == s.cfg.ForwardIP && stream.TargetPort == uint16(s.cfg.ForwardPort)
@@ -273,6 +274,7 @@ func (s *Server) processDeferredSOCKS5Syn(ctx context.Context, vpnPacket VpnProt
 		s.finalizeStreamArtifacts(vpnPacket.SessionID, vpnPacket.StreamID)
 		return
 	}
+	s.maybeEnableStreamFEC(stream)
 	target, err := SocksProto.ParseTargetPayload(assembledTarget)
 	if err != nil {
 		if !s.shouldExecuteDeferredPacket(vpnPacket) {

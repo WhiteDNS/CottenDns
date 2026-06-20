@@ -586,6 +586,12 @@ func (c *Client) HandleStreamPacket(packet VpnProto.Packet) error {
 			return nil
 		}
 
+	case Enums.PACKET_FEC_SHARD:
+		if arqObj.IsClosed() || !s.TerminalSince().IsZero() {
+			return nil
+		}
+		s.ingestFECShard(arqObj, packet.Payload)
+
 	case Enums.PACKET_STREAM_DATA_NACK:
 		if arqObj.IsClosed() || !s.TerminalSince().IsZero() {
 			return nil

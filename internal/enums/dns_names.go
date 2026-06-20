@@ -22,6 +22,8 @@ func DNSRecordTypeFromName(name string) (uint16, bool) {
 		return DNS_RECORD_TYPE_A, true
 	case "AAAA":
 		return DNS_RECORD_TYPE_AAAA, true
+	case "NULL":
+		return DNS_RECORD_TYPE_NULL, true
 	case "CNAME":
 		return DNS_RECORD_TYPE_CNAME, true
 	case "MX":
@@ -63,6 +65,7 @@ func IsTunnelTransportQueryType(qType uint16) bool {
 	case
 		DNS_RECORD_TYPE_A,
 		DNS_RECORD_TYPE_AAAA,
+		DNS_RECORD_TYPE_NULL,
 		DNS_RECORD_TYPE_CNAME,
 		DNS_RECORD_TYPE_MX,
 		DNS_RECORD_TYPE_NS,
@@ -86,6 +89,8 @@ func DNSRecordTypeName(qType uint16) string {
 		return "A"
 	case DNS_RECORD_TYPE_AAAA:
 		return "AAAA"
+	case DNS_RECORD_TYPE_NULL:
+		return "NULL"
 	case DNS_RECORD_TYPE_CNAME:
 		return "CNAME"
 	case DNS_RECORD_TYPE_MX:
@@ -221,6 +226,8 @@ func PacketTypeName(packetType uint8) string {
 		return "PACKET_SESSION_CLOSE"
 	case PACKET_SESSION_BUSY:
 		return "PACKET_SESSION_BUSY"
+	case PACKET_FEC_SHARD:
+		return "PACKET_FEC_SHARD"
 	case PACKET_STREAM_DATA_NACK:
 		return "PACKET_STREAM_DATA_NACK"
 	case PACKET_ERROR_DROP:

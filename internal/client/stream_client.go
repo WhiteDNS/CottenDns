@@ -14,7 +14,9 @@ import (
 
 	"cottenpickdns-go/internal/arq"
 	Enums "cottenpickdns-go/internal/enums"
+	"cottenpickdns-go/internal/fec"
 	"cottenpickdns-go/internal/mlq"
+	VpnProto "cottenpickdns-go/internal/vpnproto"
 )
 
 var txPacketPool = sync.Pool{
@@ -73,6 +75,41 @@ type Stream_client struct {
 	terminalSince time.Time
 	socksResultMu sync.Mutex
 	cleanupOnce   sync.Once
+
+	// Download-direction FEC decoder, lazily created the first time a
+	// PACKET_FEC_SHARD arrives for this stream. Guarded by fecMu.
+	fecMu  sync.Mutex
+	fecDec *fec.Decoder
+}
+
+// ingestFECShard feeds one framed FEC shard into the stream's decoder and
+// replays every recovered data unit into the ARQ as if its STREAM_DATA packet
+// had arrived normally. ARQ dedups by sequence number, so replaying a unit that
+// already arrived directly is a harmless no-op; recovering a lost one saves a
+// retransmit round-trip.
+func (s *Stream_client) ingestFECShard(a *arq.ARQ, frame []byte) {
+	if s == nil || a == nil || len(frame) == 0 {
+		return
+	}
+
+	s.fecMu.Lock()
+	if s.fecDec == nil {
+		s.fecDec = fec.NewDecoder()
+	}
+	units, err := s.fecDec.AddShard(frame)
+	s.fecMu.Unlock()
+
+	if err != nil || len(units) == 0 {
+		return
+	}
+
+	for _, unit := range units {
+		seq, _, payload, ok := VpnProto.UnpackFECDataUnit(unit)
+		if !ok {
+			continue
+		}
+		a.ReceiveData(seq, payload)
+	}
 }
 
 // get_new_stream_id finds the next available stream ID using a circular counter (1-65535).

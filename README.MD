@@ -68,9 +68,9 @@ Financial support is optional. If you want to support ongoing development, use o
 | 🌐 Transport | DNS tunnel over UDP/53, delegated tunnel domains, multi-resolver routing |
 | 🧦 Local access | SOCKS5 proxy mode and raw TCP forwarding mode |
 | 📡 Resolver runtime | Random, round-robin, least-loss, and lowest-latency balancing |
-| 🔁 Reliability | ARQ, ACK/NACK, RTO, retry limits, stream cleanup, packed controls |
+| 🔁 Reliability | ARQ, ACK/NACK, RTO, retry limits, stream cleanup, packed controls; optional download-path Reed-Solomon FEC for high-loss links (`FEC_DOWNLOAD_ENABLED`) |
 | 📦 Efficiency | MTU discovery, packet packing, optional base encoding, ZSTD/LZ4/ZLIB |
-| 🕵️ Anti-fingerprinting | Configurable query-type rotation (`QUERY_TYPES`), response RR-type matching (TXT→TXT, others→CNAME with TXT fallback), domain-diverse packet duplication (`DUPLICATION_PREFER_DISTINCT_DOMAINS`) |
+| 🕵️ Anti-fingerprinting | Configurable query-type rotation (`QUERY_TYPES`), response RR-type matching the server accepts by default (TXT→TXT, NULL→NULL, HTTPS/SVCB→service-binding, A→A-records, others→CNAME with TXT fallback), domain-diverse packet duplication (`DUPLICATION_PREFER_DISTINCT_DOMAINS`) |
 | 🔐 Security | None, XOR, ChaCha20, AES-128-GCM, AES-192-GCM, AES-256-GCM; server-side encryption-method auto-detection (`ENCRYPTION_AUTO_DETECT`) |
 | 📛 DNS features | Optional client-side local DNS listener/cache and server-side upstream DNS/cache |
 | 🧰 Operations | Linux systemd installers, CLI overrides, cross-platform release workflow |
@@ -241,6 +241,16 @@ journalctl -u cottenpickdns -f
 systemctl restart cottenpickdns
 systemctl stop cottenpickdns
 ```
+
+The deployed `server_config.toml` ships with these optional knobs (all safe defaults; edit and `systemctl restart cottenpickdns` to apply):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `ENCRYPTION_AUTO_DETECT` | `true` | Accept whichever encryption method the client uses (trial-decrypt) without reconfiguring the server |
+| `A_RECORD_DATA_DELIVERY` | `false` | Answer `A`-type tunnel queries with IPv4 A-record data (supplementary channel) |
+| `FEC_DOWNLOAD_ENABLED` | `false` | Reed-Solomon FEC on the download path for high-loss links; pair with `FEC_BLOCK_SIZE`/`FEC_PARITY` (e.g. `4`/`12` to ride out ~75% loss) |
+
+NULL and HTTPS/SVCB response channels need no server config — the server auto-accepts every query type the client rotates over (`QUERY_TYPES`) and answers with the matching record.
 
 ### 🧪 Manual Server Run
 

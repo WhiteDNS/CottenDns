@@ -244,6 +244,16 @@ func (s *Server) streamARQConfig(compressionType uint8) arq.Config {
 	}
 }
 
+// maybeEnableStreamFEC turns on download-direction FEC for a freshly created
+// data stream when the server is configured for it. It is idempotent, so it is
+// safe to call at every data-stream entry point.
+func (s *Server) maybeEnableStreamFEC(stream *Stream_server) {
+	if stream == nil || !s.cfg.FECDownloadEnabled {
+		return
+	}
+	stream.EnableFEC(s.cfg.FECBlockSize, s.cfg.FECParity)
+}
+
 func (s *Server) queueMainSessionPacket(sessionID uint16, packet VpnProto.Packet) bool {
 	packet.StreamID = 0
 	return s.queueSessionPacket(sessionID, packet)
@@ -390,7 +400,9 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnPr
 				ok = true
 			}
 		} else {
-			if stream == nil || stream.TXQueue == nil || stream.FastTXQueueSize() == 0 {
+			fecActive := stream != nil && stream.FECEnabled()
+			if stream == nil || stream.TXQueue == nil ||
+				(stream.FastTXQueueSize() == 0 && !(fecActive && stream.HasBufferedFECWork())) {
 				continue
 			}
 			if stream.ARQ != nil && stream.ARQ.IsClosed() {
@@ -398,17 +410,28 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnPr
 				record.deactivateStream(uint16(id))
 				continue
 			}
-			var popped *serverStreamTXPacket
-			popped, _, ok = stream.PopNextTXPacket()
-			if ok {
-				stream.NoteTXPacketDequeued(popped)
-				if (popped.PacketType == Enums.PACKET_STREAM_DATA || popped.PacketType == Enums.PACKET_STREAM_RESEND) &&
-					stream.ARQ != nil && !stream.ARQ.HasPendingSequence(popped.SequenceNum) {
-					putTXPacketToPool(popped)
+			if fecActive {
+				var popped *serverStreamTXPacket
+				popped, ok = s.fecDequeueFromStream(stream, id)
+				if ok {
+					item = popped
+					selectedStreamID = uint16(id)
+				} else {
 					continue
 				}
-				item = popped
-				selectedStreamID = uint16(id)
+			} else {
+				var popped *serverStreamTXPacket
+				popped, _, ok = stream.PopNextTXPacket()
+				if ok {
+					stream.NoteTXPacketDequeued(popped)
+					if (popped.PacketType == Enums.PACKET_STREAM_DATA || popped.PacketType == Enums.PACKET_STREAM_RESEND) &&
+						stream.ARQ != nil && !stream.ARQ.HasPendingSequence(popped.SequenceNum) {
+						putTXPacketToPool(popped)
+						continue
+					}
+					item = popped
+					selectedStreamID = uint16(id)
+				}
 			}
 		}
 
@@ -599,6 +622,63 @@ buildResult:
 		StreamID:    0,
 		HasStreamID: true,
 	}
+}
+
+// fecDequeueFromStream services one poll for a FEC-enabled stream. It returns
+// the next PACKET_FEC_SHARD to send (or a non-data control packet, which is
+// never FEC-encoded), or (nil,false) when nothing is ready this poll. Data
+// packets popped from the TXQueue are marked dispatched on the ARQ (preserving
+// its retransmit backstop), folded into the encoder, and replaced on the wire
+// by shard frames. The trailing partial block is flushed once the TXQueue
+// drains so a paused stream's tail is not stuck below a block boundary.
+func (s *Server) fecDequeueFromStream(stream *Stream_server, id int32) (*serverStreamTXPacket, bool) {
+	if frame, ok := stream.popFECShard(); ok {
+		return s.fecShardTXPacket(frame), true
+	}
+
+	for {
+		popped, _, ok := stream.PopNextTXPacket()
+		if !ok {
+			break
+		}
+		stream.NoteTXPacketDequeued(popped)
+
+		if popped.PacketType == Enums.PACKET_STREAM_DATA || popped.PacketType == Enums.PACKET_STREAM_RESEND {
+			if stream.ARQ != nil && !stream.ARQ.HasPendingSequence(popped.SequenceNum) {
+				putTXPacketToPool(popped)
+				continue
+			}
+			stream.feedFECData(popped.SequenceNum, popped.FragmentID, popped.Payload)
+			putTXPacketToPool(popped)
+			if frame, ok := stream.popFECShard(); ok {
+				return s.fecShardTXPacket(frame), true
+			}
+			continue
+		}
+
+		// Control packets (SYN/ACK/CLOSE/RST/...) are reliability-critical and
+		// must not be hidden behind FEC; send them directly, unchanged.
+		return popped, true
+	}
+
+	stream.flushFEC()
+	if frame, ok := stream.popFECShard(); ok {
+		return s.fecShardTXPacket(frame), true
+	}
+	return nil, false
+}
+
+func (s *Server) fecShardTXPacket(frame []byte) *serverStreamTXPacket {
+	pkt := getTXPacketFromPool()
+	pkt.PacketType = Enums.PACKET_FEC_SHARD
+	pkt.SequenceNum = 0
+	pkt.FragmentID = 0
+	pkt.TotalFragments = 0
+	pkt.CompressionType = compression.TypeOff
+	pkt.Payload = frame
+	pkt.CreatedAt = time.Now()
+	pkt.TTL = 0
+	return pkt
 }
 
 func vpnPacketFromTX(p *serverStreamTXPacket, streamID uint16) VpnProto.Packet {
