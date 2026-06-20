@@ -51,9 +51,9 @@ func firstQuestionQType(packet []byte) (uint16, bool) {
 //
 // answerDomain is the tunnel base domain appended as the CNAME target suffix so
 // the client can strip it before decoding.
-func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answerDomain string, packet VpnProto.Packet, baseEncode bool) ([]byte, error) {
+func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answerDomain string, packet VpnProto.Packet, baseEncode, allowARecord bool) ([]byte, error) {
 	qType, ok := firstQuestionQType(questionPacket)
-	if !ok || qType == Enums.DNS_RECORD_TYPE_TXT || answerDomain == "" {
+	if !ok || qType == Enums.DNS_RECORD_TYPE_TXT {
 		return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
 	}
 
@@ -72,13 +72,24 @@ func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answ
 		return nil, err
 	}
 
-	target, fits := encodeFrameToCNAMETarget(rawFrame, answerDomain)
-	if !fits {
-		// Too large for a single CNAME — fall back to the TXT encoding, which
-		// chunks across multiple answer strings.
-		return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
+	// A2 supplementary channel: an A query with A-record delivery enabled is
+	// answered with IPv4 A records when the frame fits the channel capacity.
+	// A records carry the frame directly and need no answer domain.
+	if allowARecord && qType == Enums.DNS_RECORD_TYPE_A {
+		if records, fits := encodeFrameToARecords(rawFrame); fits {
+			return buildARecordResponsePacket(questionPacket, answerName, records)
+		}
 	}
-	return buildCNAMEResponsePacket(questionPacket, answerName, target)
+
+	// Otherwise match with a CNAME (needs the tunnel base domain as suffix).
+	if answerDomain != "" {
+		if target, fits := encodeFrameToCNAMETarget(rawFrame, answerDomain); fits {
+			return buildCNAMEResponsePacket(questionPacket, answerName, target)
+		}
+	}
+
+	// Fall back to the TXT encoding, which chunks across multiple answer strings.
+	return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
 }
 
 // encodeFrameToCNAMETarget lowerbase36-encodes rawFrame and lays it out as
@@ -169,6 +180,11 @@ func ExtractVPNResponseMatching(packet []byte, baseEncoded bool, domains []strin
 			return VpnProto.Packet{}, ErrTXTAnswerMalformed
 		}
 		return VpnProto.ParseInflated(raw)
+	}
+
+	// A2 supplementary channel: IPv4 A records carrying the frame.
+	if pkt, ok, err := extractARecordFrame(parsed); ok {
+		return pkt, err
 	}
 
 	rawAnswers := extractTXTAnswerPayloads(parsed)

@@ -25,7 +25,7 @@ var (
 
 const (
 	integrityLength = 2
-	minHeaderLength = 4
+	minHeaderLength = 5
 
 	packetFlagValid = 1 << iota
 	packetFlagStream
@@ -61,7 +61,7 @@ var packetFlags = buildPacketFlags()
 // Payload starts immediately after the header check byte.
 
 type Packet struct {
-	SessionID     uint8
+	SessionID     uint16
 	PacketType    uint8
 	SessionCookie uint8
 
@@ -115,14 +115,14 @@ func parseFrom(data []byte, start int) (Packet, error) {
 		return Packet{}, ErrPacketTooShort
 	}
 
-	packetType := data[1]
+	packetType := data[2]
 	flags := packetFlags[packetType]
 	if flags&packetFlagValid == 0 {
 		return Packet{}, ErrInvalidPacketType
 	}
 
 	// Fast-path length check
-	minLen := 2 + integrityLength
+	minLen := 3 + integrityLength
 	if flags&packetFlagStream != 0 {
 		minLen += 2
 	}
@@ -141,11 +141,11 @@ func parseFrom(data []byte, start int) (Packet, error) {
 	}
 
 	packet := Packet{
-		SessionID:  data[0],
+		SessionID:  (uint16(data[0]) << 8) | uint16(data[1]),
 		PacketType: packetType,
 	}
 
-	offset := 2
+	offset := 3
 	if flags&packetFlagStream != 0 {
 		packet.HasStreamID = true
 		packet.StreamID = (uint16(data[offset]) << 8) | uint16(data[offset+1])

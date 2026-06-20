@@ -27,8 +27,8 @@ import (
 var ErrSessionTableFull = errors.New("session table full")
 
 const (
-	maxServerSessionID    = 255
-	maxServerSessionSlots = 255
+	maxServerSessionID    = 65535
+	maxServerSessionSlots = 65535
 	sessionInitDataSize   = 10
 	minSessionMTU         = 10
 	maxSessionMTU         = 4096
@@ -37,7 +37,7 @@ const (
 type sessionRecord struct {
 	mu sync.RWMutex
 
-	ID                                  uint8
+	ID                                  uint16
 	Cookie                              uint8
 	ResponseMode                        uint8
 	UploadCompression                   uint8
@@ -75,7 +75,7 @@ type sessionRecord struct {
 	LastPackedControlBlock          *VpnProto.Packet
 	LastPackedControlBlockRemaining int
 	closedFlag                      uint32
-	streamCleanup                   func(uint8, uint16)
+	streamCleanup                   func(uint16, uint16)
 }
 
 type recentlyClosedStreamRecord struct {
@@ -120,7 +120,7 @@ func getEffectivePriority(packetType uint8, basePriority int) int {
 }
 
 type sessionRuntimeView struct {
-	ID                  uint8
+	ID                  uint16
 	Cookie              uint8
 	ResponseMode        uint8
 	ResponseBase64      bool
@@ -158,12 +158,12 @@ type sessionValidationResult struct {
 }
 
 type closedSessionCleanup struct {
-	ID     uint8
+	ID     uint16
 	record *sessionRecord
 }
 
 type idleDeferredCleanup struct {
-	ID               uint8
+	ID               uint16
 	lastActivityNano int64
 }
 
@@ -175,8 +175,8 @@ type sessionStore struct {
 	cookieBytes            [32]byte
 	cookieIndex            int
 	byID                   [maxServerSessionID + 1]*sessionRecord
-	bySig                  map[[sessionInitDataSize]byte]uint8
-	recentClosed           map[uint8]closedSessionRecord
+	bySig                  map[[sessionInitDataSize]byte]uint16
+	recentClosed           map[uint16]closedSessionRecord
 	orphanQueueCap         int
 	streamQueueCap         int
 	maxStreamsPerSession   int
@@ -232,8 +232,8 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 		}
 	}
 	return &sessionStore{
-		bySig:                make(map[[sessionInitDataSize]byte]uint8, 64),
-		recentClosed:         make(map[uint8]closedSessionRecord, 32),
+		bySig:                make(map[[sessionInitDataSize]byte]uint16, 64),
+		recentClosed:         make(map[uint16]closedSessionRecord, 32),
 		cookieIndex:          32,
 		nextID:               1,
 		orphanQueueCap:       orphanQueueCap,
@@ -276,7 +276,7 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 	}
 
 	record := &sessionRecord{
-		ID:                uint8(slot),
+		ID:                uint16(slot),
 		ResponseMode:      payload[0],
 		CreatedAt:         now,
 		ReuseUntil:        now.Add(s.sessionInitTTL),
@@ -308,10 +308,10 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 
 	s.byID[slot] = record
 	s.activeCount++
-	s.bySig[signature] = uint8(slot)
+	s.bySig[signature] = uint16(slot)
 	s.updateNextReuseSweepLocked(record.reuseUntilUnixNano)
-	delete(s.recentClosed, uint8(slot))
-	s.nextID = uint16(nextSessionID(uint8(slot)))
+	delete(s.recentClosed, uint16(slot))
+	s.nextID = uint16(nextSessionID(uint16(slot)))
 	return record, false, nil
 }
 
@@ -338,7 +338,7 @@ func (s *sessionStore) expireReuseLocked(nowUnixNano int64) {
 	s.nextReuseSweepUnixNano = nextReuseSweepUnixNano
 }
 
-func (s *sessionStore) Get(sessionID uint8) (*sessionRecord, bool) {
+func (s *sessionStore) Get(sessionID uint16) (*sessionRecord, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record := s.byID[sessionID]
@@ -348,7 +348,7 @@ func (s *sessionStore) Get(sessionID uint8) (*sessionRecord, bool) {
 	return record, true
 }
 
-func (s *sessionStore) HasActive(sessionID uint8) bool {
+func (s *sessionStore) HasActive(sessionID uint16) bool {
 	if s == nil || sessionID == 0 {
 		return false
 	}
@@ -359,7 +359,7 @@ func (s *sessionStore) HasActive(sessionID uint8) bool {
 	return record != nil && !record.isClosed()
 }
 
-func (s *sessionStore) Lookup(sessionID uint8) (sessionLookupResult, bool) {
+func (s *sessionStore) Lookup(sessionID uint16) (sessionLookupResult, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -382,7 +382,7 @@ func (s *sessionStore) Lookup(sessionID uint8) (sessionLookupResult, bool) {
 	return sessionLookupResult{}, false
 }
 
-func (s *sessionStore) ValidateAndTouch(sessionID uint8, cookie uint8, now time.Time) sessionValidationResult {
+func (s *sessionStore) ValidateAndTouch(sessionID uint16, cookie uint8, now time.Time) sessionValidationResult {
 	s.mu.RLock()
 	if record := s.byID[sessionID]; record != nil {
 		result := sessionValidationResult{
@@ -422,7 +422,7 @@ func (s *sessionStore) ValidateAndTouch(sessionID uint8, cookie uint8, now time.
 	return sessionValidationResult{}
 }
 
-func (s *sessionStore) Close(sessionID uint8, now time.Time, retention time.Duration) (*sessionRecord, bool) {
+func (s *sessionStore) Close(sessionID uint16, now time.Time, retention time.Duration) (*sessionRecord, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -485,7 +485,7 @@ func (s *sessionStore) Cleanup(now time.Time, idleTimeout time.Duration, closedR
 			s.activeCount--
 		}
 		if closedRetention > 0 {
-			s.recentClosed[uint8(sessionID)] = closedSessionRecord{
+			s.recentClosed[uint16(sessionID)] = closedSessionRecord{
 				Cookie:       record.Cookie,
 				ResponseMode: record.ResponseMode,
 				ExpiresAt:    now.Add(closedRetention),
@@ -493,7 +493,7 @@ func (s *sessionStore) Cleanup(now time.Time, idleTimeout time.Duration, closedR
 		}
 		record.markClosed()
 		expired = append(expired, closedSessionCleanup{
-			ID:     uint8(sessionID),
+			ID:     uint16(sessionID),
 			record: record,
 		})
 	}
@@ -628,7 +628,7 @@ func (s *sessionStore) CollectIdleDeferredSessions(now time.Time, idleTimeout ti
 
 		record.markDeferredCleanupActivity(lastActivityUnixNano)
 		idle = append(idle, idleDeferredCleanup{
-			ID:               uint8(sessionID),
+			ID:               uint16(sessionID),
 			lastActivityNano: lastActivityUnixNano,
 		})
 	}
@@ -644,7 +644,7 @@ func (r *sessionRecord) markDeferredCleanupActivity(activityUnixNano int64) {
 	atomic.StoreInt64(&r.lastDeferredCleanupActivityUnixNano, activityUnixNano)
 }
 
-func nextSessionID(current uint8) uint8 {
+func nextSessionID(current uint16) uint16 {
 	if current >= maxServerSessionID {
 		return 1
 	}

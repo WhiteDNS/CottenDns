@@ -22,7 +22,7 @@ import (
 var ErrInvalidDNSUpstream = errors.New("invalid dns upstream")
 
 type dnsFragmentKey struct {
-	sessionID   uint8
+	sessionID   uint16
 	sequenceNum uint16
 }
 
@@ -66,7 +66,7 @@ func cloneInflightBytes(value []byte) []byte {
 	return append([]byte(nil), value...)
 }
 
-func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint8, sequenceNum uint16) []byte {
+func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16, sequenceNum uint16) []byte {
 	parsed, err := DnsParser.ParseDNSRequestLite(rawQuery)
 	if err != nil {
 		if errors.Is(err, DnsParser.ErrNotDNSRequest) || errors.Is(err, DnsParser.ErrPacketTooShort) {
@@ -187,7 +187,7 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint8, 
 	return resolved
 }
 
-func (s *Server) collectDNSQueryFragments(sessionID uint8, sequenceNum uint16, payload []byte, fragmentID uint8, totalFragments uint8, now time.Time) ([]byte, bool, bool) {
+func (s *Server) collectDNSQueryFragments(sessionID uint16, sequenceNum uint16, payload []byte, fragmentID uint8, totalFragments uint8, now time.Time) ([]byte, bool, bool) {
 	if totalFragments == 0 {
 		totalFragments = 1
 	}
@@ -212,7 +212,7 @@ func (s *Server) purgeDNSQueryFragments(now time.Time) {
 	s.dnsFragments.Purge(now, s.dnsFragmentTimeout)
 }
 
-func (s *Server) removeDNSQueryFragmentsForSession(sessionID uint8) {
+func (s *Server) removeDNSQueryFragmentsForSession(sessionID uint16) {
 	if s == nil || s.dnsFragments == nil || sessionID == 0 {
 		return
 	}

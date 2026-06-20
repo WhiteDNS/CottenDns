@@ -1,0 +1,126 @@
+// ==============================================================================
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
+// Year: 2026
+// ==============================================================================
+
+package fec
+
+import (
+	"bytes"
+	"fmt"
+	"testing"
+)
+
+func samplePackets(n int) [][]byte {
+	pkts := make([][]byte, n)
+	for i := range pkts {
+		// Deliberately uneven lengths to exercise per-packet padding.
+		pkts[i] = []byte(fmt.Sprintf("packet-%d-%s", i, bytes.Repeat([]byte("x"), i%7)))
+	}
+	return pkts
+}
+
+func TestEncodeDecodeNoLoss(t *testing.T) {
+	pkts := samplePackets(4)
+	block, err := EncodePackets(pkts, 4)
+	if err != nil {
+		t.Fatalf("EncodePackets: %v", err)
+	}
+	got, err := DecodePackets(block)
+	if err != nil {
+		t.Fatalf("DecodePackets: %v", err)
+	}
+	for i := range pkts {
+		if !bytes.Equal(got[i], pkts[i]) {
+			t.Fatalf("packet %d mismatch: got %q want %q", i, got[i], pkts[i])
+		}
+	}
+}
+
+// The headline requirement: survive 75% packet loss. With N data shards and
+// parity sized for 0.75 loss, dropping 75% of shards must still reconstruct.
+func TestSurvives75PercentLoss(t *testing.T) {
+	for _, dataShards := range []int{1, 2, 4, 8} {
+		parity := ParityForLoss(dataShards, 0.75)
+		pkts := samplePackets(dataShards)
+		block, err := EncodePackets(pkts, parity)
+		if err != nil {
+			t.Fatalf("EncodePackets(N=%d,K=%d): %v", dataShards, parity, err)
+		}
+
+		total := dataShards + parity
+		// Drop 75% of the shards (keep the first 25%, which is the worst case
+		// for data — many data shards lost, only parity/sparse data left).
+		keep := total - (total*3)/4
+		if keep < dataShards {
+			t.Fatalf("N=%d parity=%d: keep=%d < dataShards (not enough margin)", dataShards, parity, keep)
+		}
+		dropFromEnd := total - keep
+		for i := 0; i < dropFromEnd; i++ {
+			block.Shards[i] = nil // null the first shards (data first) -> worst case
+		}
+
+		got, err := DecodePackets(block)
+		if err != nil {
+			t.Fatalf("N=%d parity=%d after 75%% loss: DecodePackets: %v", dataShards, parity, err)
+		}
+		for i := range pkts {
+			if !bytes.Equal(got[i], pkts[i]) {
+				t.Fatalf("N=%d packet %d mismatch after loss", dataShards, i)
+			}
+		}
+	}
+}
+
+func TestReorderAndPartialLossReconstructs(t *testing.T) {
+	pkts := samplePackets(6)
+	parity := 6
+	block, err := EncodePackets(pkts, parity)
+	if err != nil {
+		t.Fatalf("EncodePackets: %v", err)
+	}
+	// Lose exactly `parity` shards spread across data and parity.
+	for _, idx := range []int{0, 2, 5, 7, 9, 11} {
+		block.Shards[idx] = nil
+	}
+	got, err := DecodePackets(block)
+	if err != nil {
+		t.Fatalf("DecodePackets: %v", err)
+	}
+	for i := range pkts {
+		if !bytes.Equal(got[i], pkts[i]) {
+			t.Fatalf("packet %d mismatch", i)
+		}
+	}
+}
+
+func TestTooFewShardsFails(t *testing.T) {
+	pkts := samplePackets(4)
+	block, err := EncodePackets(pkts, 4)
+	if err != nil {
+		t.Fatalf("EncodePackets: %v", err)
+	}
+	// Drop more than parity (5 of 8) -> only 3 < 4 dataShards remain.
+	for _, idx := range []int{0, 1, 2, 3, 4} {
+		block.Shards[idx] = nil
+	}
+	if _, err := DecodePackets(block); err == nil {
+		t.Fatal("expected error when fewer than DataShards survive")
+	}
+}
+
+func TestParityForLossMonotonic(t *testing.T) {
+	prev := 0
+	for _, loss := range []float64{0.1, 0.3, 0.5, 0.75, 0.9} {
+		p := ParityForLoss(4, loss)
+		if p < 1 {
+			t.Fatalf("loss %.2f: parity %d < 1", loss, p)
+		}
+		if p < prev {
+			t.Fatalf("parity should not decrease with loss: loss %.2f got %d after %d", loss, p, prev)
+		}
+		prev = p
+	}
+}

@@ -10,7 +10,7 @@ package vpnproto
 import "cottenpickdns-go/internal/security"
 
 type BuildOptions struct {
-	SessionID       uint8
+	SessionID       uint16
 	PacketType      uint8
 	SessionCookie   uint8
 	StreamID        uint16
@@ -27,7 +27,7 @@ func BuildRaw(opts BuildOptions) ([]byte, error) {
 		return nil, ErrInvalidPacketType
 	}
 
-	headerLen := 2 + integrityLength // SessionID + PacketType + SessionCookie + Integrity
+	headerLen := 3 + integrityLength // SessionID(2) + PacketType + SessionCookie + Integrity
 	if flags&packetFlagStream != 0 {
 		headerLen += 2
 	}
@@ -42,9 +42,10 @@ func BuildRaw(opts BuildOptions) ([]byte, error) {
 	}
 
 	raw := make([]byte, headerLen+len(opts.Payload))
-	raw[0] = opts.SessionID
-	raw[1] = opts.PacketType
-	offset := 2
+	raw[0] = byte(opts.SessionID >> 8)
+	raw[1] = byte(opts.SessionID)
+	raw[2] = opts.PacketType
+	offset := 3
 
 	if flags&packetFlagStream != 0 {
 		raw[offset] = byte(opts.StreamID >> 8)
@@ -91,7 +92,7 @@ func HeaderRawSize(packetType uint8) int {
 		return 0
 	}
 
-	size := 2 + integrityLength
+	size := 3 + integrityLength
 	if flags&packetFlagStream != 0 {
 		size += 2
 	}

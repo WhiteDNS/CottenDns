@@ -1,0 +1,166 @@
+// ==============================================================================
+// CottenpickDNS
+// Author: tajirax
+// Github: https://github.com/TaJirax/cottenpickDNS
+// Year: 2026
+// ==============================================================================
+// Package fec implements a Reed-Solomon block codec for forward error
+// correction (tier 2 loss reducer). A block of N data packets is encoded into
+// N data + K parity shards; the original packets are recoverable from any N of
+// the N+K shards, so a block survives up to K losses with no retransmit.
+//
+// This package is intentionally standalone and transport-agnostic: it encodes
+// and decodes byte-slice packets and knows nothing about DNS or ARQ. The
+// transport wiring (block framing on the wire, loss-triggered activation) is a
+// separate, later step.
+// ==============================================================================
+
+package fec
+
+import (
+	"encoding/binary"
+	"errors"
+
+	"github.com/klauspost/reedsolomon"
+)
+
+var (
+	ErrInvalidShardCounts = errors.New("fec: invalid shard counts")
+	ErrPacketTooLarge     = errors.New("fec: packet exceeds 65535 bytes")
+	ErrCorruptShard       = errors.New("fec: corrupt or undersized shard")
+	ErrTooFewShards       = errors.New("fec: not enough shards to reconstruct block")
+)
+
+// lengthPrefix holds each packet's original length inside its padded shard so
+// padding can be stripped after reconstruction.
+const lengthPrefix = 2
+
+// maxShards is the Reed-Solomon limit (data+parity must fit a single byte index).
+const maxShards = 256
+
+// Block is an encoded FEC block. Shards has length DataShards+ParityShards and
+// every entry is ShardSize bytes; a nil entry marks a shard lost in transit.
+type Block struct {
+	DataShards   int
+	ParityShards int
+	ShardSize    int
+	Shards       [][]byte
+}
+
+// EncodePackets packs variable-length packets into a Reed-Solomon block with
+// parityShards recovery shards. Each packet is stored as [len:2][bytes] padded
+// to a uniform shard size (the longest packet wins). The returned block can lose
+// any parityShards of its shards and still be decoded.
+func EncodePackets(packets [][]byte, parityShards int) (*Block, error) {
+	dataShards := len(packets)
+	if dataShards < 1 || parityShards < 1 || dataShards+parityShards > maxShards {
+		return nil, ErrInvalidShardCounts
+	}
+
+	shardSize := lengthPrefix + 1
+	for _, p := range packets {
+		if len(p) > 0xFFFF {
+			return nil, ErrPacketTooLarge
+		}
+		if lengthPrefix+len(p) > shardSize {
+			shardSize = lengthPrefix + len(p)
+		}
+	}
+
+	enc, err := reedsolomon.New(dataShards, parityShards)
+	if err != nil {
+		return nil, err
+	}
+
+	shards := make([][]byte, dataShards+parityShards)
+	for i := range shards {
+		shards[i] = make([]byte, shardSize)
+	}
+	for i, p := range packets {
+		binary.BigEndian.PutUint16(shards[i][0:2], uint16(len(p)))
+		copy(shards[i][lengthPrefix:], p)
+	}
+
+	if err := enc.Encode(shards); err != nil {
+		return nil, err
+	}
+	return &Block{
+		DataShards:   dataShards,
+		ParityShards: parityShards,
+		ShardSize:    shardSize,
+		Shards:       shards,
+	}, nil
+}
+
+// DecodePackets reconstructs the original packets from a block whose Shards may
+// contain nil (lost) entries, provided at least DataShards shards are present.
+func DecodePackets(b *Block) ([][]byte, error) {
+	if b == nil || b.DataShards < 1 || b.ParityShards < 1 {
+		return nil, ErrInvalidShardCounts
+	}
+	if len(b.Shards) != b.DataShards+b.ParityShards {
+		return nil, ErrInvalidShardCounts
+	}
+
+	present := 0
+	for _, s := range b.Shards {
+		if s != nil {
+			present++
+		}
+	}
+	if present < b.DataShards {
+		return nil, ErrTooFewShards
+	}
+
+	enc, err := reedsolomon.New(b.DataShards, b.ParityShards)
+	if err != nil {
+		return nil, err
+	}
+	if err := enc.ReconstructData(b.Shards); err != nil {
+		return nil, err
+	}
+
+	packets := make([][]byte, b.DataShards)
+	for i := 0; i < b.DataShards; i++ {
+		s := b.Shards[i]
+		if len(s) < lengthPrefix {
+			return nil, ErrCorruptShard
+		}
+		n := int(binary.BigEndian.Uint16(s[0:2]))
+		if lengthPrefix+n > len(s) {
+			return nil, ErrCorruptShard
+		}
+		packets[i] = append([]byte(nil), s[lengthPrefix:lengthPrefix+n]...)
+	}
+	return packets, nil
+}
+
+// ParityForLoss returns a parity-shard count that lets a block of dataShards
+// survive the given loss fraction with a small safety margin. It is the bridge
+// from the measured loss to a concrete code rate (e.g. 0.75 loss over 4 data
+// shards -> enough parity that receiving ~25% still decodes).
+func ParityForLoss(dataShards int, lossFrac float64) int {
+	if dataShards < 1 {
+		return 0
+	}
+	if lossFrac < 0 {
+		lossFrac = 0
+	}
+	if lossFrac > 0.95 {
+		lossFrac = 0.95
+	}
+	// Total shards T such that survivors (1-loss)*T >= dataShards, plus margin.
+	survive := 1.0 - lossFrac
+	if survive <= 0 {
+		survive = 0.05
+	}
+	total := int(float64(dataShards)/survive + 0.999)
+	parity := total - dataShards + 1 // +1 shard of margin
+	if parity < 1 {
+		parity = 1
+	}
+	if dataShards+parity > maxShards {
+		parity = maxShards - dataShards
+	}
+	return parity
+}

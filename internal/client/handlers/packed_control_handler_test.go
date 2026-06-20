@@ -21,7 +21,7 @@ type packedTestClientContext struct {
 }
 
 func (m *packedTestClientContext) Log() *logger.Logger { return nil }
-func (m *packedTestClientContext) SessionID() uint8    { return 1 }
+func (m *packedTestClientContext) SessionID() uint16    { return 1 }
 func (m *packedTestClientContext) IsSessionReady() bool {
 	return true
 }

@@ -36,7 +36,7 @@ var (
 )
 
 type socks5FragmentKey struct {
-	sessionID   uint8
+	sessionID   uint16
 	streamID    uint16
 	sequenceNum uint16
 }
@@ -383,7 +383,7 @@ func writeAll(conn net.Conn, payload []byte) error {
 	return nil
 }
 
-func (s *Server) collectSOCKS5SynFragments(sessionID uint8, streamID uint16, sequenceNum uint16, payload []byte, fragmentID uint8, totalFragments uint8, now time.Time) ([]byte, bool, bool) {
+func (s *Server) collectSOCKS5SynFragments(sessionID uint16, streamID uint16, sequenceNum uint16, payload []byte, fragmentID uint8, totalFragments uint8, now time.Time) ([]byte, bool, bool) {
 	if totalFragments == 0 {
 		totalFragments = 1
 	}
@@ -411,7 +411,7 @@ func (s *Server) purgeSOCKS5SynFragments(now time.Time) {
 	s.socks5Fragments.Purge(now, s.dnsFragmentTimeout)
 }
 
-func (s *Server) removeSOCKS5SynFragmentsForSession(sessionID uint8) {
+func (s *Server) removeSOCKS5SynFragmentsForSession(sessionID uint16) {
 	if s == nil || s.socks5Fragments == nil || sessionID == 0 {
 		return
 	}
@@ -420,7 +420,7 @@ func (s *Server) removeSOCKS5SynFragmentsForSession(sessionID uint8) {
 	})
 }
 
-func (s *Server) removeSOCKS5SynFragmentsForStream(sessionID uint8, streamID uint16) {
+func (s *Server) removeSOCKS5SynFragmentsForStream(sessionID uint16, streamID uint16) {
 	if s == nil || s.socks5Fragments == nil || sessionID == 0 || streamID == 0 {
 		return
 	}

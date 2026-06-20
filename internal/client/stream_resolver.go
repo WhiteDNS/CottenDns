@@ -1,11 +1,16 @@
 package client
 
 import (
+	"math"
 	"time"
 
 	"cottenpickdns-go/internal/arq"
 	Enums "cottenpickdns-go/internal/enums"
 )
+
+// adaptiveDuplicationCeiling caps the duplication count chosen by tier-1
+// adaptive duplication; beyond this, loss is better handled by Reed-Solomon FEC.
+const adaptiveDuplicationCeiling = 8
 
 // directionalDuplicationCounts returns the effective upload/download and
 // upload-setup/download-setup duplication counts. After config normalization
@@ -67,7 +72,48 @@ func (c *Client) runtimePacketDuplicationCount(packetType uint8) int {
 	if count < 1 {
 		count = 1
 	}
+	if c.cfg.AdaptiveDuplication {
+		count = c.adaptiveDuplicationCount(count)
+	}
 	return count
+}
+
+// adaptiveDuplicationCount raises base toward the number of copies needed to hit
+// the configured target delivery probability given the currently measured loss
+// (tier 1). With per-packet loss L and target delivery P, the copies C satisfy
+// 1 - L^C >= P, i.e. C = ceil(ln(1-P)/ln(L)). The result is clamped to
+// [base, adaptiveDuplicationCeiling]; loss high enough to demand more than the
+// ceiling is the regime where Reed-Solomon FEC (tier 2) takes over.
+func (c *Client) adaptiveDuplicationCount(base int) int {
+	if c == nil || c.balancer == nil {
+		return base
+	}
+	lossPM := c.balancer.AggregateLossPerMille()
+	if lossPM == 0 {
+		return base
+	}
+	return duplicationForLoss(base, float64(lossPM)/1000.0, c.cfg.AdaptiveDuplicationTargetDelivery)
+}
+
+// duplicationForLoss returns the copy count needed to reach target delivery
+// probability under per-packet loss lossFrac, clamped to [base, ceiling]. See
+// adaptiveDuplicationCount for the model. Pure (no receiver) so it is unit
+// testable in isolation.
+func duplicationForLoss(base int, lossFrac, target float64) int {
+	if lossFrac <= 0 || lossFrac >= 1 {
+		return base
+	}
+	if target <= 0 || target >= 1 {
+		target = 0.95
+	}
+	need := int(math.Ceil(math.Log(1-target) / math.Log(lossFrac)))
+	if need < base {
+		need = base
+	}
+	if need > adaptiveDuplicationCeiling {
+		need = adaptiveDuplicationCeiling
+	}
+	return need
 }
 
 func (c *Client) selectTargetConnectionsForPacket(packetType uint8, streamID uint16) ([]Connection, error) {

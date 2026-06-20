@@ -32,7 +32,7 @@ const (
 	mtuProbeDownMinSize = mtuProbeUpMinSize + 2
 	mtuProbeMinDownSize = 30
 	mtuProbeMaxDownSize = 4096
-	sessionAcceptSize   = 7
+	sessionAcceptSize   = 8
 )
 
 var preSessionPacketTypes = buildPreSessionPacketTypes()

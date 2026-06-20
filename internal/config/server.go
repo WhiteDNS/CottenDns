@@ -76,6 +76,7 @@ type ServerConfig struct {
 	SupportedDownloadCompressionTypes []int    `toml:"SUPPORTED_DOWNLOAD_COMPRESSION_TYPES"`
 	DataEncryptionMethod              int      `toml:"DATA_ENCRYPTION_METHOD"`
 	EncryptionAutoDetect              bool     `toml:"ENCRYPTION_AUTO_DETECT"`
+	ARecordDataDelivery               bool     `toml:"A_RECORD_DATA_DELIVERY"`
 	EncryptionKeyFile                 string   `toml:"ENCRYPTION_KEY_FILE"`
 	LogLevel                          string   `toml:"LOG_LEVEL"`
 	ARQWindowSize                     int      `toml:"ARQ_WINDOW_SIZE"`

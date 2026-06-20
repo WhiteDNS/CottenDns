@@ -149,6 +149,14 @@ type ClientConfig struct {
 	// possible, for independent-path delivery on lossy links and signature
 	// spread. Default false preserves the historical resolver-only selection.
 	DuplicationPreferDistinctDomains bool `toml:"DUPLICATION_PREFER_DISTINCT_DOMAINS"`
+	// ADAPTIVE_DUPLICATION (tier 1 loss reducer): when true, the per-packet
+	// duplication count is scaled up from the configured base toward the count
+	// needed to hit ADAPTIVE_DUPLICATION_TARGET_DELIVERY given the measured loss,
+	// clamped to the duplication ceiling (8). Default false.
+	AdaptiveDuplication bool `toml:"ADAPTIVE_DUPLICATION"`
+	// ADAPTIVE_DUPLICATION_TARGET_DELIVERY is the per-packet delivery probability
+	// adaptive duplication aims for (0.5..0.999). Default 0.95.
+	AdaptiveDuplicationTargetDelivery float64 `toml:"ADAPTIVE_DUPLICATION_TARGET_DELIVERY"`
 }
 
 type ClientConfigOverrides struct {
@@ -376,6 +384,16 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 		return cfg, err
 	}
 	cfg.QueryTypeCodes = queryTypeCodes
+
+	if cfg.AdaptiveDuplicationTargetDelivery <= 0 {
+		cfg.AdaptiveDuplicationTargetDelivery = 0.95
+	}
+	if cfg.AdaptiveDuplicationTargetDelivery < 0.5 {
+		cfg.AdaptiveDuplicationTargetDelivery = 0.5
+	}
+	if cfg.AdaptiveDuplicationTargetDelivery > 0.999 {
+		cfg.AdaptiveDuplicationTargetDelivery = 0.999
+	}
 
 	cfg.ListenIP = defaultString(strings.TrimSpace(cfg.ListenIP), "127.0.0.1")
 

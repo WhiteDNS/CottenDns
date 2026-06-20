@@ -13,7 +13,7 @@ import (
 )
 
 type invalidCookieTrackerKey struct {
-	sessionID      uint8
+	sessionID      uint16
 	expectedCookie uint16
 	packetCookie   uint8
 	state          uint8
@@ -37,7 +37,7 @@ func newInvalidCookieTracker() *invalidCookieTracker {
 	}
 }
 
-func (t *invalidCookieTracker) Note(sessionID uint8, lookup sessionLookupResult, known bool, packetCookie uint8, nowUnix int64, windowNanos int64, threshold int) bool {
+func (t *invalidCookieTracker) Note(sessionID uint16, lookup sessionLookupResult, known bool, packetCookie uint8, nowUnix int64, windowNanos int64, threshold int) bool {
 	if t == nil || windowNanos <= 0 || threshold <= 0 {
 		return false
 	}

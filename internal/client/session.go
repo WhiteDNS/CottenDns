@@ -28,7 +28,7 @@ var (
 
 const (
 	sessionInitPayloadSize      = 10
-	sessionAcceptPayloadSize    = 7
+	sessionAcceptPayloadSize    = 8
 	sessionBusyPayloadSize      = 4
 	sessionCloseBurstMaxTargets = 10
 	sessionCloseBurstRounds     = 3
@@ -78,14 +78,14 @@ func (c *Client) initializeSessionOnce() error {
 		c.setSessionInitBusyUntil(time.Now().Add(c.cfg.SessionInitBusyRetryInterval()))
 		return ErrSessionInitBusy
 	case Enums.PACKET_SESSION_ACCEPT:
-		if len(packet.Payload) < sessionAcceptPayloadSize || !bytes.Equal(packet.Payload[3:7], verifyCode[:]) {
+		if len(packet.Payload) < sessionAcceptPayloadSize || !bytes.Equal(packet.Payload[4:8], verifyCode[:]) {
 			return ErrSessionInitFailed
 		}
 
-		c.sessionID = packet.Payload[0]
-		c.sessionCookie = packet.Payload[1]
+		c.sessionID = uint16(packet.Payload[0])<<8 | uint16(packet.Payload[1])
+		c.sessionCookie = packet.Payload[2]
 		c.responseMode = initPayload[0]
-		c.uploadCompression, c.downloadCompression = compression.SplitPair(packet.Payload[2])
+		c.uploadCompression, c.downloadCompression = compression.SplitPair(packet.Payload[3])
 		c.sessionReady = true
 		c.applySessionCompressionPolicy()
 		c.clearSessionInitBusyUntil()
@@ -204,7 +204,7 @@ func (c *Client) buildSessionQuery(domain string, packetType uint8, payload []by
 	return c.buildTunnelQuery(domain, 0, packetType, payload)
 }
 
-func (c *Client) buildTunnelQuery(domain string, sessionID uint8, packetType uint8, payload []byte) ([]byte, error) {
+func (c *Client) buildTunnelQuery(domain string, sessionID uint16, packetType uint8, payload []byte) ([]byte, error) {
 	return c.buildTunnelTXTQueryRaw(domain, VpnProto.BuildOptions{
 		SessionID:  sessionID,
 		PacketType: packetType,

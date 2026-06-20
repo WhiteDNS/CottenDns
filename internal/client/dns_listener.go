@@ -24,7 +24,7 @@ import (
 )
 
 type dnsFragmentKey struct {
-	SessionID   uint8
+	SessionID   uint16
 	SequenceNum uint16
 }
 

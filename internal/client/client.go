@@ -91,7 +91,7 @@ type Client struct {
 	logBasedMTUVerify          bool
 
 	// Session States
-	sessionID           uint8
+	sessionID           uint16
 	sessionCookie       uint8
 	responseMode        uint8
 	sessionReady        bool

@@ -618,7 +618,7 @@ func TestDeferredSessionProcessorSessionCapRejectsExcessSingleSessionLoad(t *tes
 		t.Fatal("expected deferred processor")
 	}
 
-	sessionID := uint8(11)
+	sessionID := uint16(11)
 	for i := 0; i < int(processor.sessionCap()); i++ {
 		lane := deferredSessionLane{sessionID: sessionID, streamID: uint16(i + 1)}
 		if !processor.Enqueue(lane, func(context.Context) {}) {
@@ -1104,7 +1104,7 @@ func TestMapSOCKSConnectErrorMapsBlockedTargetToRulesetDenied(t *testing.T) {
 	}
 }
 
-func packetWithSession(packetType uint8, sessionID uint8, cookie uint8, streamID uint16) VpnProto.Packet {
+func packetWithSession(packetType uint8, sessionID uint16, cookie uint8, streamID uint16) VpnProto.Packet {
 	return VpnProto.Packet{
 		SessionID:      sessionID,
 		SessionCookie:  cookie,

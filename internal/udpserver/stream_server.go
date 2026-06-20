@@ -25,7 +25,7 @@ type Stream_server struct {
 	rxQueueMu sync.Mutex
 
 	ID        uint16
-	SessionID uint8
+	SessionID uint16
 	ARQ       *arq.ARQ
 	TXQueue   *mlq.MultiLevelQueue[*serverStreamTXPacket]
 
@@ -42,7 +42,7 @@ type Stream_server struct {
 	log          arq.Logger
 }
 
-func NewStreamServer(streamID uint16, sessionID uint8, arqConfig arq.Config, localConn io.ReadWriteCloser, mtu int, queueInitialCapacity int, logger arq.Logger) *Stream_server {
+func NewStreamServer(streamID uint16, sessionID uint16, arqConfig arq.Config, localConn io.ReadWriteCloser, mtu int, queueInitialCapacity int, logger arq.Logger) *Stream_server {
 	if queueInitialCapacity < 1 {
 		queueInitialCapacity = 32
 	}

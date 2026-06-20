@@ -231,6 +231,15 @@ DATA_ENCRYPTION_METHOD = 1
 # (slightly less CPU per packet, no auto-adaptation).
 ENCRYPTION_AUTO_DETECT = true
 
+# A2 supplementary delivery channel. When true, an A-type tunnel query (the
+# client must include "A" in its QUERY_TYPES) is answered with IPv4 A records
+# carrying the frame (index byte + 3 data bytes per record) instead of a CNAME.
+# This is an additional anti-fingerprinting channel alongside TXT/CNAME, not a
+# replacement: it holds up to ~766 bytes per response, and larger frames fall
+# back to CNAME/TXT automatically. IPv6/AAAA is intentionally not used because
+# the target networks block IPv6. Default false (off).
+A_RECORD_DATA_DELIVERY = false
+
 # Relative or absolute path to the encryption key file.
 ENCRYPTION_KEY_FILE = "encrypt_key.txt"
 

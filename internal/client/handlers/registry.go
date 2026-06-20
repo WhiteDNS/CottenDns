@@ -19,7 +19,7 @@ import (
 // This prevents circular dependencies between the 'client' and 'handlers' packages.
 type ClientContext interface {
 	Log() *logger.Logger
-	SessionID() uint8
+	SessionID() uint16
 	IsSessionReady() bool
 	ResponseMode() uint8
 	NotifyPacket(packetType uint8, isInbound bool)

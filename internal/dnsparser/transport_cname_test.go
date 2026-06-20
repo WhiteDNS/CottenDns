@@ -47,7 +47,7 @@ func TestA2NonTXTQueryGetsCNAMEAndRoundTrips(t *testing.T) {
 		Payload:    payload,
 	}
 
-	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false)
+	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false, false)
 	if err != nil {
 		t.Fatalf("BuildVPNResponsePacketMatchingQuery: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestA2TXTQueryStaysTXT(t *testing.T) {
 	query := buildQueryWithType(t, "abc."+cnameTestDomain, Enums.DNS_RECORD_TYPE_TXT)
 
 	in := VpnProto.Packet{PacketType: Enums.PACKET_PONG, Payload: []byte("hi")}
-	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false)
+	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false, false)
 	if err != nil {
 		t.Fatalf("BuildVPNResponsePacketMatchingQuery: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestA2LargePayloadFallsBackToTXT(t *testing.T) {
 		Payload:        payload,
 	}
 
-	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false)
+	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, cnameTestDomain, in, false, false)
 	if err != nil {
 		t.Fatalf("BuildVPNResponsePacketMatchingQuery: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestA2EmptyAnswerDomainStaysTXT(t *testing.T) {
 	in := VpnProto.Packet{PacketType: Enums.PACKET_PONG, Payload: []byte("hi")}
 
 	// No answer domain -> cannot build a CNAME suffix -> TXT.
-	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, "", in, false)
+	response, err := BuildVPNResponsePacketMatchingQuery(query, "abc."+cnameTestDomain, "", in, false, false)
 	if err != nil {
 		t.Fatalf("BuildVPNResponsePacketMatchingQuery: %v", err)
 	}

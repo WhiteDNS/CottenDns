@@ -113,7 +113,7 @@ func (s *Server) handleSessionCloseNotice(vpnPacket VpnProto.Packet, now time.Ti
 	}
 }
 
-func (s *Server) logInvalidSessionDrop(reason string, sessionID uint8, receivedCookie uint8, expectedCookie uint8, responseMode uint8) {
+func (s *Server) logInvalidSessionDrop(reason string, sessionID uint16, receivedCookie uint8, expectedCookie uint8, responseMode uint8) {
 	if !s.debugLoggingEnabled() {
 		return
 	}
@@ -142,7 +142,7 @@ func (s *Server) logInvalidSessionDrop(reason string, sessionID uint8, receivedC
 	)
 }
 
-func invalidSessionDropLogConfig(reason string, sessionID uint8, receivedCookie uint8, expectedCookie uint8, responseMode uint8) (string, time.Duration) {
+func invalidSessionDropLogConfig(reason string, sessionID uint16, receivedCookie uint8, expectedCookie uint8, responseMode uint8) (string, time.Duration) {
 	switch reason {
 	case "recently closed session":
 		return fmt.Sprintf("recently-closed:%d:%d:%d", sessionID, expectedCookie, responseMode), 3 * time.Second
@@ -155,13 +155,13 @@ func invalidSessionDropLogConfig(reason string, sessionID uint8, receivedCookie 
 	}
 }
 
-func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint8, responseMode uint8) []byte {
+func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint16, responseMode uint8) []byte {
 	payload := s.nextInvalidDropPayload()
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
 		SessionID:  sessionID,
 		PacketType: Enums.PACKET_ERROR_DROP,
 		Payload:    payload[:],
-	}, responseMode == mtuProbeModeBase64)
+	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -178,7 +178,7 @@ func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName str
 		SessionID:  0,
 		PacketType: Enums.PACKET_SESSION_BUSY,
 		Payload:    payload[:],
-	}, responseMode == mtuProbeModeBase64)
+	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -191,14 +191,14 @@ func (s *Server) buildSessionVPNResponse(questionPacket []byte, requestName stri
 	}
 	packet.SessionID = record.ID
 	packet.SessionCookie = record.Cookie
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64)
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
 	return response
 }
 
-func (s *Server) queueSessionPacket(sessionID uint8, packet VpnProto.Packet) bool {
+func (s *Server) queueSessionPacket(sessionID uint16, packet VpnProto.Packet) bool {
 	record, ok := s.sessions.Get(sessionID)
 	if !ok {
 		return false
@@ -244,12 +244,12 @@ func (s *Server) streamARQConfig(compressionType uint8) arq.Config {
 	}
 }
 
-func (s *Server) queueMainSessionPacket(sessionID uint8, packet VpnProto.Packet) bool {
+func (s *Server) queueMainSessionPacket(sessionID uint16, packet VpnProto.Packet) bool {
 	packet.StreamID = 0
 	return s.queueSessionPacket(sessionID, packet)
 }
 
-func (s *Server) cleanupClosedSession(sessionID uint8, record *sessionRecord) {
+func (s *Server) cleanupClosedSession(sessionID uint16, record *sessionRecord) {
 	if s == nil || sessionID == 0 {
 		return
 	}
@@ -261,7 +261,7 @@ func (s *Server) cleanupClosedSession(sessionID uint8, record *sessionRecord) {
 	s.cleanupDeferredSessionState(sessionID)
 }
 
-func (s *Server) cleanupDeferredSessionState(sessionID uint8) {
+func (s *Server) cleanupDeferredSessionState(sessionID uint16) {
 	if s == nil || sessionID == 0 {
 		return
 	}
@@ -274,7 +274,7 @@ func (s *Server) cleanupDeferredSessionState(sessionID uint8) {
 	s.removeDNSQueryFragmentsForSession(sessionID)
 }
 
-func (s *Server) cleanupIdleDeferredSession(sessionID uint8, lastActivityNano int64, now time.Time) {
+func (s *Server) cleanupIdleDeferredSession(sessionID uint16, lastActivityNano int64, now time.Time) {
 	if s == nil || sessionID == 0 {
 		return
 	}
@@ -284,7 +284,7 @@ func (s *Server) cleanupIdleDeferredSession(sessionID uint8, lastActivityNano in
 	s.cleanupDeferredSessionState(sessionID)
 }
 
-func (s *Server) cleanupStreamArtifacts(sessionID uint8, streamID uint16) {
+func (s *Server) cleanupStreamArtifacts(sessionID uint16, streamID uint16) {
 	if s == nil || sessionID == 0 || streamID == 0 {
 		return
 	}
@@ -292,7 +292,7 @@ func (s *Server) cleanupStreamArtifacts(sessionID uint8, streamID uint16) {
 	s.removeSOCKS5SynFragmentsForStream(sessionID, streamID)
 }
 
-func (s *Server) finalizeStreamArtifacts(sessionID uint8, streamID uint16) {
+func (s *Server) finalizeStreamArtifacts(sessionID uint16, streamID uint16) {
 	if s == nil || sessionID == 0 || streamID == 0 {
 		return
 	}
@@ -318,7 +318,7 @@ func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, re
 	})
 }
 
-func (s *Server) dequeueSessionResponse(sessionID uint8, now time.Time) (*VpnProto.Packet, bool) {
+func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnProto.Packet, bool) {
 	record, ok := s.sessions.Get(sessionID)
 	if !ok {
 		return nil, false
@@ -753,16 +753,17 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 	}
 
 	var responsePayload [sessionAcceptSize]byte
-	responsePayload[0] = record.ID
-	responsePayload[1] = record.Cookie
-	responsePayload[2] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
-	copy(responsePayload[3:], record.VerifyCode[:])
+	responsePayload[0] = byte(record.ID >> 8)
+	responsePayload[1] = byte(record.ID)
+	responsePayload[2] = record.Cookie
+	responsePayload[3] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
+	copy(responsePayload[4:], record.VerifyCode[:])
 
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:  0,
 		PacketType: Enums.PACKET_SESSION_ACCEPT,
 		Payload:    responsePayload[:],
-	}, record.ResponseMode == mtuProbeModeBase64)
+	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -795,7 +796,7 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 		SessionID:  vpnPacket.SessionID,
 		PacketType: Enums.PACKET_MTU_UP_RES,
 		Payload:    responsePayload[:],
-	}, baseEncode)
+	}, baseEncode, s.cfg.ARecordDataDelivery)
 
 	if err != nil {
 		return nil
@@ -839,7 +840,7 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 		FragmentID:     vpnPacket.FragmentID,
 		TotalFragments: vpnPacket.TotalFragments,
 		Payload:        payload,
-	}, baseEncode)
+	}, baseEncode, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
 	}

@@ -121,7 +121,7 @@ type ARQ struct {
 	mu sync.RWMutex
 
 	streamID             uint16
-	sessionID            uint8
+	sessionID            uint16
 	ioReady              bool
 	streamWorkersStarted bool
 	enqueuer             PacketEnqueuer
@@ -324,7 +324,7 @@ func (a *ARQ) HasPendingSequence(sn uint16) bool {
 }
 
 // NewARQ instantiates a pristine reliable streaming overlay suitable for client or server
-func NewARQ(streamID uint16, sessionID uint8, enqueuer PacketEnqueuer, localConn io.ReadWriteCloser, mtu int, logger Logger, cfg Config) *ARQ {
+func NewARQ(streamID uint16, sessionID uint16, enqueuer PacketEnqueuer, localConn io.ReadWriteCloser, mtu int, logger Logger, cfg Config) *ARQ {
 	if logger == nil {
 		logger = &DummyLogger{}
 	}

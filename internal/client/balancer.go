@@ -594,6 +594,37 @@ func (b *Balancer) lossScore(snap *balancerSnapshot, idx int) uint64 {
 	return (sent - acked) * 1000 / sent
 }
 
+// AggregateLossPerMille returns the mean observed packet loss (parts per 1000)
+// across valid connections that have enough samples, or 0 when there is no loss
+// signal yet. It drives tier-1 adaptive duplication.
+func (b *Balancer) AggregateLossPerMille() uint64 {
+	snap := b.snapshot.Load()
+	if snap == nil || len(snap.valid) == 0 {
+		return 0
+	}
+	var total, n uint64
+	for _, idx := range snap.valid {
+		stats := statsByIndex(snap, idx)
+		if stats == nil {
+			continue
+		}
+		sent, acked, _, _ := stats.snapshot()
+		if sent < 5 {
+			continue
+		}
+		loss := uint64(0)
+		if acked < sent {
+			loss = (sent - acked) * 1000 / sent
+		}
+		total += loss
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return total / n
+}
+
 func (b *Balancer) latencyScore(snap *balancerSnapshot, idx int) uint64 {
 	stats := statsByIndex(snap, idx)
 	if stats == nil {

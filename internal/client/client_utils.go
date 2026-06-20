@@ -79,7 +79,7 @@ func isHotPacketLogType(packetType uint8) bool {
 	}
 }
 
-func (c *Client) logInboundPacket(packetType uint8, sessionID uint8, payloadLen int, streamID uint16, sequenceNum uint16, fragmentID uint8, totalFragments uint8, packedSummary string) {
+func (c *Client) logInboundPacket(packetType uint8, sessionID uint16, payloadLen int, streamID uint16, sequenceNum uint16, fragmentID uint8, totalFragments uint8, packedSummary string) {
 	if c == nil || c.log == nil || packetType == Enums.PACKET_PONG {
 		return
 	}
@@ -93,7 +93,7 @@ func (c *Client) logInboundPacket(packetType uint8, sessionID uint8, payloadLen 
 	c.log.Debugf(format, Enums.PacketTypeName(packetType), sessionID, payloadLen, streamID, sequenceNum, fragmentID, totalFragments, packedSummary)
 }
 
-func (c *Client) logOutboundPacket(packetType uint8, sessionID uint8, payloadLen int, streamID uint16, sequenceNum uint16, fragmentID uint8, totalFragments uint8, packedSummary string) {
+func (c *Client) logOutboundPacket(packetType uint8, sessionID uint16, payloadLen int, streamID uint16, sequenceNum uint16, fragmentID uint8, totalFragments uint8, packedSummary string) {
 	if c == nil || c.log == nil || packetType == Enums.PACKET_PING {
 		return
 	}
@@ -167,7 +167,7 @@ func (c *Client) SessionReady() bool {
 	return c.sessionReady
 }
 
-func (c *Client) SessionID() uint8 {
+func (c *Client) SessionID() uint16 {
 	return c.sessionID
 }
 

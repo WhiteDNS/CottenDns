@@ -17,7 +17,7 @@ import (
 
 func buildRawPacket(
 	t *testing.T,
-	sessionID uint8,
+	sessionID uint16,
 	packetType uint8,
 	streamID uint16,
 	sequenceNum uint16,
@@ -30,7 +30,7 @@ func buildRawPacket(
 	t.Helper()
 
 	raw := make([]byte, 0, 16+len(payload))
-	raw = append(raw, sessionID, packetType)
+	raw = append(raw, byte(sessionID>>8), byte(sessionID), packetType)
 
 	if hasStreamExtension(packetType) {
 		raw = append(raw, byte(streamID>>8), byte(streamID))
@@ -95,8 +95,8 @@ func TestParseStreamDataPacket(t *testing.T) {
 	if !parsed.HasCompressionType || parsed.CompressionType != 2 {
 		t.Fatalf("unexpected compression info: %+v", parsed)
 	}
-	if parsed.HeaderLength != 11 {
-		t.Fatalf("unexpected header length: got=%d want=%d", parsed.HeaderLength, 11)
+	if parsed.HeaderLength != 12 {
+		t.Fatalf("unexpected header length: got=%d want=%d", parsed.HeaderLength, 12)
 	}
 	if !bytes.Equal(parsed.Payload, payload) {
 		t.Fatalf("unexpected payload: got=%q want=%q", parsed.Payload, payload)

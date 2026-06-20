@@ -18,7 +18,7 @@ import (
 )
 
 type deferredSessionLane struct {
-	sessionID uint8
+	sessionID uint16
 	streamID  uint16
 }
 
@@ -39,7 +39,7 @@ type deferredSessionProcessor struct {
 	laneWorker         map[deferredSessionLane]int
 	cancelled          map[deferredSessionLane]struct{}
 	running            map[deferredSessionLane]context.CancelFunc
-	sessionPending     map[uint8]int32
+	sessionPending     map[uint16]int32
 	sessionPendingCap  int32
 	sessionPressureLog throttledLogState
 	backlogHighLog     throttledLogState
@@ -102,7 +102,7 @@ func newDeferredSessionProcessor(workerCount int, queueLimit int, log *logger.Lo
 		laneWorker:        make(map[deferredSessionLane]int, 128),
 		cancelled:         make(map[deferredSessionLane]struct{}, 128),
 		running:           make(map[deferredSessionLane]context.CancelFunc, 128),
-		sessionPending:    make(map[uint8]int32, 64),
+		sessionPending:    make(map[uint16]int32, 64),
 		sessionPendingCap: deriveDeferredSessionPendingCap(workerCount, queueLimit),
 	}
 }
@@ -156,7 +156,7 @@ func (p *deferredSessionProcessor) Enqueue(lane deferredSessionLane, run func(co
 	return ok
 }
 
-func (p *deferredSessionProcessor) RemoveSession(sessionID uint8) {
+func (p *deferredSessionProcessor) RemoveSession(sessionID uint16) {
 	if p == nil {
 		return
 	}
@@ -352,14 +352,14 @@ func (p *deferredSessionProcessor) compactWorkerLocked(workerIdx int, drop func(
 	}
 }
 
-func (p *deferredSessionProcessor) canAcceptSessionLocked(sessionID uint8) bool {
+func (p *deferredSessionProcessor) canAcceptSessionLocked(sessionID uint16) bool {
 	if p == nil || sessionID == 0 {
 		return true
 	}
 	return p.sessionPending[sessionID] < p.sessionPendingCap
 }
 
-func (p *deferredSessionProcessor) decrementSessionPendingLocked(sessionID uint8) {
+func (p *deferredSessionProcessor) decrementSessionPendingLocked(sessionID uint16) {
 	if p == nil || sessionID == 0 {
 		return
 	}

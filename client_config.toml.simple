@@ -34,6 +34,16 @@ QUERY_TYPES = ["TXT"]
 # a duplication count of 1. Default false.
 DUPLICATION_PREFER_DISTINCT_DOMAINS = false
 
+# Tier-1 loss reducer: when true, the per-packet duplication count is scaled up
+# automatically from the configured base toward the number of copies needed to
+# reach ADAPTIVE_DUPLICATION_TARGET_DELIVERY at the measured loss, capped at 8.
+# (At very high loss the cap is hit and Reed-Solomon FEC, when enabled, takes
+# over.) Default false.
+ADAPTIVE_DUPLICATION = false
+# Target per-packet delivery probability adaptive duplication aims for
+# (0.5..0.999). Default 0.95.
+ADAPTIVE_DUPLICATION_TARGET_DELIVERY = 0.95
+
 # Encryption method for tunnel payloads.
 # Allowed values:
 # 0 = None

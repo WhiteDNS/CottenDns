@@ -32,7 +32,7 @@ func (t *testReadWriteCloser) Close() error {
 	return nil
 }
 
-func newTestSessionRecord(sessionID uint8) *sessionRecord {
+func newTestSessionRecord(sessionID uint16) *sessionRecord {
 	r := &sessionRecord{
 		ID:               sessionID,
 		DownloadMTU:      512,

@@ -357,27 +357,27 @@ func (s *Server) isDeferredPacketStillTracked(packet VpnProto.Packet) bool {
 	return exists
 }
 
-func (s *Server) clearDeferredPacketsForSession(sessionID uint8) {
+func (s *Server) clearDeferredPacketsForSession(sessionID uint16) {
 	if s == nil || sessionID == 0 {
 		return
 	}
 	s.clearDeferredInflightForSession(sessionID)
 }
 
-func (s *Server) clearDeferredInflightForSession(sessionID uint8) {
+func (s *Server) clearDeferredInflightForSession(sessionID uint16) {
 	if s == nil || sessionID == 0 {
 		return
 	}
 	s.deferredInflightMu.Lock()
 	for key := range s.deferredInflight {
-		if uint8(key>>48) == sessionID {
+		if uint16(key>>48) == sessionID {
 			delete(s.deferredInflight, key)
 		}
 	}
 	s.deferredInflightMu.Unlock()
 }
 
-func (s *Server) clearDeferredPacketsForStream(sessionID uint8, streamID uint16) {
+func (s *Server) clearDeferredPacketsForStream(sessionID uint16, streamID uint16) {
 	if s == nil || sessionID == 0 || streamID == 0 {
 		return
 	}
@@ -390,7 +390,7 @@ func (s *Server) clearDeferredPacketsForStream(sessionID uint8, streamID uint16)
 	}
 }
 
-func (s *Server) finalizeDeferredPacketsForStream(sessionID uint8, streamID uint16) {
+func (s *Server) finalizeDeferredPacketsForStream(sessionID uint16, streamID uint16) {
 	if s == nil || sessionID == 0 || streamID == 0 {
 		return
 	}
@@ -403,13 +403,13 @@ func (s *Server) finalizeDeferredPacketsForStream(sessionID uint8, streamID uint
 	}
 }
 
-func (s *Server) clearDeferredInflightForStream(sessionID uint8, streamID uint16) {
+func (s *Server) clearDeferredInflightForStream(sessionID uint16, streamID uint16) {
 	if s == nil || sessionID == 0 || streamID == 0 {
 		return
 	}
 	s.deferredInflightMu.Lock()
 	for key := range s.deferredInflight {
-		if uint8(key>>48) == sessionID && uint16(key>>32) == streamID {
+		if uint16(key>>48) == sessionID && uint16(key>>32) == streamID {
 			delete(s.deferredInflight, key)
 		}
 	}
