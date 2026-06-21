@@ -44,6 +44,13 @@ SUPPORTED_DOWNLOAD_COMPRESSION_TYPES = [0, 1, 2, 3]
 UDP_HOST = "0.0.0.0"
 UDP_PORT = 53
 
+# Also serve DNS-over-TCP on the same host:port. Many restrictive networks
+# filter or truncate UDP/53 but still allow TCP/53, so this lets clients fall
+# back to TCP without any change to the tunnel. Default on. TCP_MAX_CONNS caps
+# concurrent TCP connections (0 = built-in default).
+TCP_LISTENER_ENABLED = true
+TCP_MAX_CONNS = 2048
+
 # Number of UDP reader goroutines.
 # If <= 0, code falls back to an auto default.
 UDP_READERS = 7
@@ -331,4 +338,4 @@ LOG_LEVEL = "INFO"
 
 # ------------------------------------------------------------------------------
 
-CONFIG_VERSION = "12"
+CONFIG_VERSION = "13"

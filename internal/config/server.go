@@ -30,6 +30,11 @@ type ServerConfig struct {
 	UDPHost                           string   `toml:"UDP_HOST"`
 	UDPPort                           int      `toml:"UDP_PORT"`
 	UDPReaders                        int      `toml:"UDP_READERS"`
+	// TCPListenerEnabled also serves DNS-over-TCP on the same host:port, so
+	// clients on networks that filter or truncate UDP/53 can fall back to TCP/53.
+	// Default true. TCPMaxConns caps concurrent TCP connections (0 = default).
+	TCPListenerEnabled                bool     `toml:"TCP_LISTENER_ENABLED"`
+	TCPMaxConns                       int      `toml:"TCP_MAX_CONNS"`
 	SocketBufferSize                  int      `toml:"SOCKET_BUFFER_SIZE"`
 	MaxConcurrentRequests             int      `toml:"MAX_CONCURRENT_REQUESTS"`
 	DNSRequestWorkers                 int      `toml:"DNS_REQUEST_WORKERS"`
@@ -130,6 +135,8 @@ func defaultServerConfig() ServerConfig {
 		ProtocolType:                      "SOCKS5",
 		UDPHost:                           "0.0.0.0",
 		UDPPort:                           53,
+		TCPListenerEnabled:                true,
+		TCPMaxConns:                       2048,
 		UDPReaders:                        readers,
 		SocketBufferSize:                  8 * 1024 * 1024,
 		MaxConcurrentRequests:             16384,

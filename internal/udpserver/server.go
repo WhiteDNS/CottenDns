@@ -400,6 +400,19 @@ func (s *Server) Run(ctx context.Context) error {
 	s.deferredConnectSession.Start(runCtx)
 	s.startDNSWorkers(runCtx, conn, reqCh, &workerWG)
 
+	// DNS-over-TCP fallback on the same host:port, for clients on networks that
+	// filter or truncate UDP/53. Shares the transport-agnostic packet handler.
+	var tcpWG sync.WaitGroup
+	if s.cfg.TCPListenerEnabled {
+		tcpWG.Add(1)
+		go func() {
+			defer tcpWG.Done()
+			if err := s.serveTCP(runCtx, s.cfg.UDPHost, s.cfg.UDPPort); err != nil && runCtx.Err() == nil {
+				s.log.Warnf("<yellow>TCP listener stopped: <cyan>%v</cyan></yellow>", err)
+			}
+		}()
+	}
+
 	go func() {
 		<-runCtx.Done()
 		_ = conn.Close()
@@ -413,6 +426,7 @@ func (s *Server) Run(ctx context.Context) error {
 	close(reqCh)
 	workerWG.Wait()
 	cancel()
+	tcpWG.Wait()
 	<-cleanupDone
 
 	if ctx.Err() != nil {
