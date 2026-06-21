@@ -127,6 +127,14 @@ type Client struct {
 	tunnelProcessWorkers int
 	tunnelPacketTimeout  time.Duration
 
+	// useTCP reports the active resolver transport. It starts false (UDP) and is
+	// set true when RESOLVER_TRANSPORT is "tcp", or by the "auto" fallback when a
+	// full UDP MTU scan finds zero usable resolvers. All query paths (probe,
+	// session-init, health, data plane) dispatch on it. tcpData carries the
+	// persistent per-resolver TCP connections used by the data plane in TCP mode.
+	useTCP  atomic.Bool
+	tcpData *tcpDataManager
+
 	// Local Proxy Daemons
 	tcpListener *TCPListener
 	dnsListener *DNSListener

@@ -115,6 +115,19 @@ func (c *Client) exchangeUDPQueryWithConn(conn *net.UDPConn, packet []byte, time
 }
 
 func (c *Client) sendOneWayDNSQuery(resolver Connection, packet []byte, deadline time.Time) error {
+	if c.useTCP.Load() {
+		// Best-effort one-shot DNS-over-TCP (e.g. the session-close burst).
+		d := net.Dialer{Timeout: time.Until(deadline)}
+		conn, err := d.Dial("tcp", resolver.ResolverLabel)
+		if err != nil {
+			return err
+		}
+		_ = conn.SetWriteDeadline(deadline)
+		werr := writeTCPDNSFramed(conn, packet)
+		_ = conn.Close()
+		return werr
+	}
+
 	udpConn, err := c.getUDPConn(resolver.ResolverLabel)
 	if err != nil {
 		return err
@@ -252,46 +265,54 @@ func normalizeTimeout(timeout time.Duration, fallback time.Duration) time.Durati
 	return timeout
 }
 
-// udpQueryTransport wraps a UDP connection for queries.
+// udpQueryTransport wraps a UDP connection for synchronous queries and satisfies
+// queryExchanger (see transport.go).
 type udpQueryTransport struct {
-	conn *net.UDPConn
+	client *Client
+	conn   *net.UDPConn
 }
 
-// newUDPQueryTransport creates a new transport for UDP queries to the specified resolver.
-func newUDPQueryTransport(resolverLabel string) (*udpQueryTransport, error) {
-	conn, err := dialUDPResolver(resolverLabel)
-	if err != nil {
-		return nil, err
-	}
-
-	return &udpQueryTransport{
-		conn: conn,
-	}, nil
-}
-
-// exchangeUDPQuery performs a synchronous UDP request-response cycle using the provided transport.
-func (c *Client) exchangeUDPQuery(transport *udpQueryTransport, packet []byte, timeout time.Duration) ([]byte, error) {
-	if transport == nil || transport.conn == nil {
+func (t *udpQueryTransport) exchange(packet []byte, timeout time.Duration) ([]byte, error) {
+	if t == nil || t.conn == nil || t.client == nil {
 		return nil, net.ErrClosed
 	}
-
-	return c.exchangeUDPQueryWithConn(transport.conn, packet, timeout)
+	return t.client.exchangeUDPQueryWithConn(t.conn, packet, timeout)
 }
 
-// exchangeDNSOverConnection sends a DNS query and returns the extracted VPN packet.
+func (t *udpQueryTransport) Close() error {
+	if t == nil || t.conn == nil {
+		return nil
+	}
+	return t.conn.Close()
+}
+
+// exchangeDNSOverConnection sends a DNS query and returns the extracted VPN
+// packet, over the client's active transport (UDP, or DNS-over-TCP in TCP mode).
 func (c *Client) exchangeDNSOverConnection(conn Connection, query []byte, timeout time.Duration) (VpnProto.Packet, error) {
-	udpConn, err := c.getUDPConn(conn.ResolverLabel)
-	if err != nil {
-		return VpnProto.Packet{}, err
-	}
+	var response []byte
 
-	response, err := c.exchangeUDPQueryWithConn(udpConn, query, timeout)
-	if err != nil {
-		_ = udpConn.Close()
-		return VpnProto.Packet{}, err
+	if c.useTCP.Load() {
+		transport, err := newTCPQueryTransport(conn.ResolverLabel, tcpQueryDialTimeout)
+		if err != nil {
+			return VpnProto.Packet{}, err
+		}
+		response, err = transport.exchange(query, timeout)
+		_ = transport.Close()
+		if err != nil {
+			return VpnProto.Packet{}, err
+		}
+	} else {
+		udpConn, err := c.getUDPConn(conn.ResolverLabel)
+		if err != nil {
+			return VpnProto.Packet{}, err
+		}
+		response, err = c.exchangeUDPQueryWithConn(udpConn, query, timeout)
+		if err != nil {
+			_ = udpConn.Close()
+			return VpnProto.Packet{}, err
+		}
+		c.putUDPConn(conn.ResolverLabel, udpConn)
 	}
-
-	c.putUDPConn(conn.ResolverLabel, udpConn)
 
 	packet, err := dnsparser.ExtractVPNResponseMatching(response, c.responseMode == mtuProbeBase64Reply, c.cfg.Domains)
 	if err != nil {

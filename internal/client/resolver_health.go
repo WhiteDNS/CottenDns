@@ -756,11 +756,11 @@ func (c *Client) recheckResolverConnection(ctx context.Context, conn *Connection
 		return true
 	}
 
-	transport, err := newUDPQueryTransport(conn.ResolverLabel)
+	transport, err := c.newQueryTransport(conn.ResolverLabel)
 	if err != nil {
 		return false
 	}
-	defer transport.conn.Close()
+	defer transport.Close()
 
 	upOK := false
 	for attempt := 0; attempt < c.mtuTestRetries; attempt++ {

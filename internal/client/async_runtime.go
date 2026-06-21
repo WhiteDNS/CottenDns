@@ -36,6 +36,10 @@ func (c *Client) StopAsyncRuntime() {
 	if c.asyncCancel != nil {
 		c.log.Debugf("\U0001F6D1 <yellow>Stopping Async Runtime...</yellow>")
 		c.asyncCancel()
+		if c.tcpData != nil {
+			c.tcpData.Stop()
+			c.tcpData = nil
+		}
 		c.closeTunnelSockets()
 		c.asyncWG.Wait()
 		c.asyncCancel = nil
@@ -235,6 +239,10 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 			return
 		}
 		cancel()
+		if c.tcpData != nil {
+			c.tcpData.Stop()
+			c.tcpData = nil
+		}
 		if c.tcpListener != nil {
 			c.tcpListener.Stop()
 			c.tcpListener = nil
@@ -284,10 +292,18 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 		}
 	}
 
-	// 6. Spawn Reader Workers (High-speed ingestion)
-	for i := 0; i < c.tunnelRX_TX_Workers; i++ {
-		c.asyncWG.Add(1)
-		go c.asyncReaderWorker(runtimeCtx, i, conns[i])
+	// 6. Spawn ingestion. In UDP mode each socket has a reader worker. In TCP
+	// mode the persistent per-resolver TCP connections feed rxChannel from their
+	// own read loops, so no UDP readers are started.
+	if c.useTCP.Load() {
+		c.tcpData = newTCPDataManager(c)
+		c.tcpData.Start(runtimeCtx)
+		c.log.Infof("\U0001F517 <cyan>Resolver transport: <green>TCP/53</green> (persistent connections)</cyan>")
+	} else {
+		for i := 0; i < c.tunnelRX_TX_Workers; i++ {
+			c.asyncWG.Add(1)
+			go c.asyncReaderWorker(runtimeCtx, i, conns[i])
+		}
 	}
 
 	// 5. Spawn Processor Workers (Parallel data analysis)
@@ -635,8 +651,17 @@ func (c *Client) asyncWriterWorker(ctx context.Context, id int, conn *net.UDPCon
 					_ = conn.SetWriteDeadline(lastDeadline)
 				}
 			}
+			useTCP := c.useTCP.Load()
 			for _, frame := range task.frames {
 				if frame.addr == nil || len(frame.packet) == 0 {
+					continue
+				}
+				if useTCP {
+					// TCP mode: route through the persistent per-resolver TCP
+					// connections; Send handles its own send-tracking.
+					if c.tcpData != nil {
+						c.tcpData.Send(frame.serverKey, frame.addr, frame.packet, now)
+					}
 					continue
 				}
 				if _, err := conn.WriteToUDP(frame.packet, frame.addr); err == nil {

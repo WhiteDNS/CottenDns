@@ -45,6 +45,12 @@ type ClientConfig struct {
 	LocalDNSCachePersist                  bool              `toml:"LOCAL_DNS_CACHE_PERSIST_TO_FILE"`
 	LocalDNSCacheFlushSec                 float64           `toml:"LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS"`
 	ResolverBalancingStrategy             int               `toml:"RESOLVER_BALANCING_STRATEGY"`
+	// ResolverTransport selects how DNS queries reach resolvers:
+	//   "auto" (default) — probe over UDP first; if no resolver passes MTU
+	//                       testing, retry the whole fleet over TCP/53.
+	//   "udp"            — UDP only (legacy).
+	//   "tcp"            — TCP/53 only (for networks that block UDP/53).
+	ResolverTransport                     string            `toml:"RESOLVER_TRANSPORT"`
 	UploadPacketDuplicationCount          int               `toml:"UPLOAD_PACKET_DUPLICATION_COUNT"`
 	DownloadPacketDuplicationCount        int               `toml:"DOWNLOAD_PACKET_DUPLICATION_COUNT"`
 	UploadSetupPacketDuplicationCount     int               `toml:"UPLOAD_SETUP_PACKET_DUPLICATION_COUNT"`
@@ -208,6 +214,7 @@ func defaultClientConfig() ClientConfig {
 		LocalDNSCachePersist:                  true,
 		LocalDNSCacheFlushSec:                 60.0,
 		ResolverBalancingStrategy:             3,
+		ResolverTransport:                     "auto",
 		UploadPacketDuplicationCount:          3,
 		DownloadPacketDuplicationCount:        7,
 		UploadSetupPacketDuplicationCount:     4,
@@ -458,6 +465,17 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 
 	if cfg.ResolverBalancingStrategy < 0 || cfg.ResolverBalancingStrategy > 5 {
 		return cfg, fmt.Errorf("invalid RESOLVER_BALANCING_STRATEGY: %d", cfg.ResolverBalancingStrategy)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(cfg.ResolverTransport)) {
+	case "", "auto":
+		cfg.ResolverTransport = "auto"
+	case "udp":
+		cfg.ResolverTransport = "udp"
+	case "tcp":
+		cfg.ResolverTransport = "tcp"
+	default:
+		return cfg, fmt.Errorf("invalid RESOLVER_TRANSPORT: %q (want auto|udp|tcp)", cfg.ResolverTransport)
 	}
 
 	cfg.UploadPacketDuplicationCount = clampInt(defaultIntBelow(cfg.UploadPacketDuplicationCount, 1, 3), 1, 8)

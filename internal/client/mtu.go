@@ -78,12 +78,47 @@ type mtuScanCounters struct {
 	rejectDownload atomic.Int32
 }
 
-// RunInitialMTUTests tests all connections before the client starts.
+// RunInitialMTUTests tests all connections before the client starts. With
+// RESOLVER_TRANSPORT="auto" it probes over UDP first and, if no resolver passes,
+// retries the whole fleet over DNS-over-TCP/53 — so a network that blocks or
+// truncates UDP/53 transparently falls back to TCP. "udp"/"tcp" force a single
+// transport.
 func (c *Client) RunInitialMTUTests(ctx context.Context) error {
 	if len(c.connections) == 0 {
 		return ErrNoValidConnections
 	}
-	return c.runFullMTUTests(ctx)
+
+	switch c.cfg.ResolverTransport {
+	case "tcp":
+		c.useTCP.Store(true)
+	default: // "udp" or "auto" both start on UDP
+		c.useTCP.Store(false)
+	}
+
+	err := c.runFullMTUTests(ctx)
+	if err == nil {
+		return nil
+	}
+
+	// auto fallback: zero usable resolvers over UDP -> retry the fleet over TCP.
+	if c.cfg.ResolverTransport == "auto" && errors.Is(err, ErrNoValidConnections) && !c.useTCP.Load() {
+		if c.log != nil {
+			c.log.Warnf("<yellow>No resolvers passed over UDP/53 — retrying the whole fleet over TCP/53…</yellow>")
+		}
+		c.useTCP.Store(true)
+		for i := range c.connections {
+			c.prepareConnectionMTUScanState(&c.connections[i])
+		}
+		if tcpErr := c.runFullMTUTests(ctx); tcpErr == nil {
+			if c.log != nil {
+				c.log.Infof("<green>✅ Resolver transport fell back to TCP/53.</green>")
+			}
+			return nil
+		}
+		// TCP also failed — surface the original error, restore UDP default.
+		c.useTCP.Store(false)
+	}
+	return err
 }
 
 // runFullMTUTests performs the original fully-sequential blocking MTU scan and
@@ -494,12 +529,12 @@ func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, ser
 func (c *Client) probeConnectionMTU(ctx context.Context, conn *Connection, maxUploadPayload int) (mtuConnectionProbeResult, mtuRejectReason) {
 	var result mtuConnectionProbeResult
 
-	probeTransport, err := newUDPQueryTransport(conn.ResolverLabel)
+	probeTransport, err := c.newQueryTransport(conn.ResolverLabel)
 	if err != nil {
 		conn.IsValid = false
 		return result, mtuRejectUpload
 	}
-	defer probeTransport.conn.Close()
+	defer probeTransport.Close()
 
 	upOK, upBytes, upChars, upRTT, upLoss, err := c.testUploadMTU(ctx, conn, probeTransport, maxUploadPayload)
 	if err != nil || !upOK {
@@ -535,7 +570,7 @@ func (c *Client) precomputeUploadCaps() map[string]int {
 	return caps
 }
 
-func (c *Client) testUploadMTU(ctx context.Context, conn *Connection, probeTransport *udpQueryTransport, maxPayload int) (bool, int, int, time.Duration, float64, error) {
+func (c *Client) testUploadMTU(ctx context.Context, conn *Connection, probeTransport queryExchanger, maxPayload int) (bool, int, int, time.Duration, float64, error) {
 	if maxPayload <= 0 {
 		return false, 0, 0, 0, 0, nil
 	}
@@ -568,7 +603,7 @@ func (c *Client) testUploadMTU(ctx context.Context, conn *Connection, probeTrans
 	return true, best, c.encodedCharsForPayload(best), bestRTT, bestLoss, nil
 }
 
-func (c *Client) testDownloadMTU(ctx context.Context, conn *Connection, probeTransport *udpQueryTransport, uploadMTU int) (bool, int, time.Duration, float64, error) {
+func (c *Client) testDownloadMTU(ctx context.Context, conn *Connection, probeTransport queryExchanger, uploadMTU int) (bool, int, time.Duration, float64, error) {
 	if c.log != nil && c.log.Enabled(logger.LevelDebug) {
 		c.log.Debugf("<cyan>[MTU]</cyan> Testing download MTU for %s", conn.Domain)
 	}
@@ -752,7 +787,7 @@ func (c *Client) evaluateMTUCandidate(ctx context.Context, value int, testFn fun
 	return false, 0, 1
 }
 
-func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probeTransport *udpQueryTransport, mtuSize int, options mtuProbeOptions) (bool, time.Duration, error) {
+func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probeTransport queryExchanger, mtuSize int, options mtuProbeOptions) (bool, time.Duration, error) {
 	if mtuSize < 1+mtuProbeCodeLength {
 		return false, 0, nil
 	}
@@ -778,7 +813,7 @@ func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probe
 	}
 
 	startedAt := time.Now()
-	response, err := c.exchangeUDPQuery(probeTransport, query, c.mtuTestTimeout)
+	response, err := probeTransport.exchange(query, c.mtuTestTimeout)
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,
@@ -860,7 +895,7 @@ func (c *Client) sendUploadMTUProbe(ctx context.Context, conn *Connection, probe
 	return ok, rtt, nil
 }
 
-func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, probeTransport *udpQueryTransport, mtuSize int, uploadMTU int, options mtuProbeOptions) (bool, time.Duration, error) {
+func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, probeTransport queryExchanger, mtuSize int, uploadMTU int, options mtuProbeOptions) (bool, time.Duration, error) {
 	if mtuSize < defaultMTUMinFloor {
 		return false, 0, nil
 	}
@@ -892,7 +927,7 @@ func (c *Client) sendDownloadMTUProbe(ctx context.Context, conn *Connection, pro
 	}
 
 	startedAt := time.Now()
-	response, err := c.exchangeUDPQuery(probeTransport, query, c.mtuTestTimeout)
+	response, err := probeTransport.exchange(query, c.mtuTestTimeout)
 	if err != nil {
 		c.logMTUProbe(
 			options.IsRetry,

@@ -148,6 +148,16 @@ LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS = 60.0
 # Modes 3 and 4 use runtime feedback from sends/successes.
 RESOLVER_BALANCING_STRATEGY = 3
 
+# How DNS queries reach resolvers:
+#   "auto" (default) - probe over UDP/53 first; if NO resolver passes MTU
+#                      testing, retry the whole fleet over DNS-over-TCP/53.
+#                      Zero cost on UDP-working networks (TCP is never tried).
+#   "udp"            - UDP only (legacy behavior).
+#   "tcp"            - TCP/53 only, for networks that block or truncate UDP/53.
+# The server serves TCP/53 by default (TCP_LISTENER_ENABLED), so no server change
+# is needed to use TCP.
+RESOLVER_TRANSPORT = "auto"
+
 # ---- Packet duplication -------------------------------------------------------
 # All tunnel packets are sent by the client as DNS queries, so every
 # duplicated packet consumes upload bandwidth. The "direction" below refers

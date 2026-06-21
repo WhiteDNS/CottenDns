@@ -158,14 +158,14 @@ func startEchoServer(t *testing.T) int {
 
 func TestTunnelEndToEndEcho(t *testing.T) {
 	// Matched encryption method on both sides (baseline + A1/A2/A6 coverage).
-	runTunnelEcho(t, 1, 1, "", "")
+	runTunnelEcho(t, 1, 1, "", "", "")
 }
 
 func TestTunnelEndToEndEncryptionAutoDetect(t *testing.T) {
 	// Server configured for method 1 (XOR); client uses method 3 (AES-128-GCM)
 	// with the same shared key. The tunnel must still come up, proving the
 	// server auto-detects the client's encryption method.
-	runTunnelEcho(t, 1, 3, "", "")
+	runTunnelEcho(t, 1, 3, "", "", "")
 }
 
 func TestTunnelEndToEndFECDownload(t *testing.T) {
@@ -173,7 +173,7 @@ func TestTunnelEndToEndFECDownload(t *testing.T) {
 	// STREAM_DATA. The payload must still round-trip byte-for-byte, proving the
 	// server's FEC encode path and the client's decode/replay path are wired
 	// correctly end-to-end through the real wire framing.
-	runTunnelEcho(t, 1, 1, "FEC_DOWNLOAD_ENABLED = true\nFEC_BLOCK_SIZE = 4\nFEC_PARITY = 4\n", "")
+	runTunnelEcho(t, 1, 1, "FEC_DOWNLOAD_ENABLED = true\nFEC_BLOCK_SIZE = 4\nFEC_PARITY = 4\n", "", "")
 }
 
 func TestTunnelEndToEndNewTransportChannels(t *testing.T) {
@@ -181,10 +181,17 @@ func TestTunnelEndToEndNewTransportChannels(t *testing.T) {
 	// CNAME). The server must auto-accept every query type and answer with the
 	// matching RR type, with no server-side channel configuration. A byte-exact
 	// echo proves the new channels are wired end-to-end and default-accepted.
-	runTunnelEcho(t, 1, 1, "", `["TXT", "CNAME", "NULL", "HTTPS"]`)
+	runTunnelEcho(t, 1, 1, "", `["TXT", "CNAME", "NULL", "HTTPS"]`, "")
 }
 
-func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, clientQueryTypes string) {
+func TestTunnelEndToEndTCPTransport(t *testing.T) {
+	// Force the client onto DNS-over-TCP/53. The server's TCP listener (default
+	// on) must serve the entire tunnel — probe, session init, and data plane —
+	// and echo 64 KB byte-for-byte, proving the TCP fallback works end to end.
+	runTunnelEcho(t, 1, 1, "", "", "RESOLVER_TRANSPORT = \"tcp\"\n")
+}
+
+func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, clientQueryTypes, clientExtra string) {
 	if clientQueryTypes == "" {
 		clientQueryTypes = `["TXT", "CNAME", "A", "AAAA"]`
 	}
@@ -337,7 +344,8 @@ MAX_PACKETS_PER_BATCH = 1
 ARQ_MAX_CONTROL_RETRIES = 300
 ARQ_DATA_NACK_INITIAL_DELAY_SECONDS = 0.35
 ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
-`, clientPort, encryptionKey, clientQueryTypes, clientMethod)), 0644); err != nil {
+%s
+`, clientPort, encryptionKey, clientQueryTypes, clientMethod, clientExtra)), 0644); err != nil {
 		t.Fatalf("write client cfg: %v", err)
 	}
 
