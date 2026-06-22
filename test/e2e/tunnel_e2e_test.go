@@ -191,6 +191,14 @@ func TestTunnelEndToEndTCPTransport(t *testing.T) {
 	runTunnelEcho(t, 1, 1, "", "", "RESOLVER_TRANSPORT = \"tcp\"\n")
 }
 
+func TestTunnelEndToEndTCPWithNonTXTChannels(t *testing.T) {
+	// Integration check: DNS-over-TCP/53 transport AND the non-TXT response
+	// channels (NULL, HTTPS) together. The client rotates query types over TCP;
+	// the server must answer each with the matching record type over TCP framing
+	// and the payload must still round-trip byte-for-byte.
+	runTunnelEcho(t, 1, 1, "", `["TXT", "CNAME", "NULL", "HTTPS"]`, "RESOLVER_TRANSPORT = \"tcp\"\n")
+}
+
 func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, clientQueryTypes, clientExtra string) {
 	if clientQueryTypes == "" {
 		clientQueryTypes = `["TXT", "CNAME", "A", "AAAA"]`

@@ -185,6 +185,14 @@ func (c *Client) recordResolverHealthEvent(serverKey string, success bool, now t
 		return
 	}
 
+	// Feed the adaptive pacer: success eases the resolver's cooldown, a failure
+	// (RCODE != 0 / timeout — i.e. an overload signal) grows its backoff window.
+	if success {
+		c.pacer.success(serverKey)
+	} else {
+		c.pacer.throttle(serverKey, now)
+	}
+
 	c.resolverHealthMu.Lock()
 	defer c.resolverHealthMu.Unlock()
 

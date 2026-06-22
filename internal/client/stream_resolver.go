@@ -169,7 +169,10 @@ func (c *Client) selectTargetConnectionsForPacket(packetType uint8, streamID uin
 		return selected, nil
 	}
 
-	for _, connection := range c.balancer.GetUniqueConnections(targetCount) {
+	// Pull a slightly larger candidate pool than needed and move paced (throttling)
+	// resolvers to the back, so the spread prefers resolvers with headroom but
+	// still falls back to paced ones rather than under-filling.
+	for _, connection := range c.orderByPacing(c.balancer.GetUniqueConnections(targetCount * 2)) {
 		if !connection.IsValid || connection.Key == "" {
 			continue
 		}
@@ -258,10 +261,12 @@ func (c *Client) selectUniqueRuntimeConnections(requiredCount int) ([]Connection
 		return nil, ErrNoValidConnections
 	}
 
-	connections := c.balancer.GetUniqueConnections(requiredCount)
+	connections := c.balancer.GetUniqueConnections(requiredCount * 2)
 	if len(connections) == 0 {
 		return nil, ErrNoValidConnections
 	}
+	// Prefer resolvers with headroom (paced ones sink to the back).
+	connections = c.orderByPacing(connections)
 
 	// Filter out runtime-disabled resolvers so control packets
 	// (SYN, CLOSE, RST, ACK, etc.) are not sent to known-bad resolvers.
@@ -270,6 +275,9 @@ func (c *Client) selectUniqueRuntimeConnections(requiredCount int) ([]Connection
 		if !c.isRuntimeDisabledResolver(conn.Key) {
 			filtered = append(filtered, conn)
 		}
+	}
+	if len(filtered) > requiredCount {
+		filtered = filtered[:requiredCount]
 	}
 	if len(filtered) == 0 {
 		return nil, ErrNoValidConnections

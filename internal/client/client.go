@@ -135,6 +135,9 @@ type Client struct {
 	useTCP  atomic.Bool
 	tcpData *tcpDataManager
 
+	// pacer applies per-resolver adaptive rate limiting (see resolver_pacer.go).
+	pacer *resolverPacer
+
 	// Local Proxy Daemons
 	tcpListener *TCPListener
 	dnsListener *DNSListener
@@ -359,6 +362,7 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 		log:                      log,
 		codec:                    codec,
 		balancer:                 NewBalancer(cfg.ResolverBalancingStrategy),
+		pacer:                    newResolverPacer(cfg.ResolverRateLimitEnabled),
 		uploadCompression:        uint8(cfg.UploadCompressionType),
 		downloadCompression:      uint8(cfg.DownloadCompressionType),
 		mtuCryptoOverhead:        mtuCryptoOverhead(cfg.DataEncryptionMethod),

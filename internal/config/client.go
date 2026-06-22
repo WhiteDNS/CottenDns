@@ -45,6 +45,12 @@ type ClientConfig struct {
 	LocalDNSCachePersist                  bool              `toml:"LOCAL_DNS_CACHE_PERSIST_TO_FILE"`
 	LocalDNSCacheFlushSec                 float64           `toml:"LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS"`
 	ResolverBalancingStrategy             int               `toml:"RESOLVER_BALANCING_STRATEGY"`
+	// ResolverRateLimitEnabled turns on per-resolver adaptive pacing: a resolver
+	// that signals overload (RCODE != 0 or repeated timeouts) is briefly cooled
+	// down and deprioritized so its load shifts to resolvers with headroom. It is
+	// self-gating (does nothing to healthy resolvers) and never idles the client.
+	// Default true.
+	ResolverRateLimitEnabled              bool              `toml:"RESOLVER_RATE_LIMIT_ENABLED"`
 	// ResolverTransport selects how DNS queries reach resolvers:
 	//   "auto" (default) — probe over UDP first; if no resolver passes MTU
 	//                       testing, retry the whole fleet over TCP/53.
@@ -214,6 +220,7 @@ func defaultClientConfig() ClientConfig {
 		LocalDNSCachePersist:                  true,
 		LocalDNSCacheFlushSec:                 60.0,
 		ResolverBalancingStrategy:             3,
+		ResolverRateLimitEnabled:              true,
 		ResolverTransport:                     "auto",
 		UploadPacketDuplicationCount:          3,
 		DownloadPacketDuplicationCount:        7,

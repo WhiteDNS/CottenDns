@@ -158,6 +158,15 @@ RESOLVER_BALANCING_STRATEGY = 3
 # is needed to use TCP.
 RESOLVER_TRANSPORT = "auto"
 
+# Per-resolver adaptive rate limiting. When a resolver signals overload (DNS
+# RCODE != 0 — REFUSED/SERVFAIL — or repeated timeouts) it is briefly cooled down
+# and deprioritized so its load shifts to resolvers with headroom; sustained
+# success fully restores it. This is redistribution, not a global throttle: it is
+# self-gating (does nothing to healthy resolvers) and never idles the client (a
+# packet still goes out over a paced resolver if none else is free). It also
+# avoids triggering resolver/IP rate-limit blocks. Default on.
+RESOLVER_RATE_LIMIT_ENABLED = true
+
 # ---- Packet duplication -------------------------------------------------------
 # All tunnel packets are sent by the client as DNS queries, so every
 # duplicated packet consumes upload bandwidth. The "direction" below refers
