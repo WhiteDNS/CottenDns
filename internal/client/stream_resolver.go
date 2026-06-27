@@ -333,12 +333,16 @@ func (c *Client) selectAlternateStreamConnection(excludeKey string) (Connection,
 		return Connection{}, false
 	}
 
+	now := c.now()
 	if excludeKey != "" {
-		if replacement, ok := c.balancer.GetBestConnectionExcluding(excludeKey); ok && !c.isRuntimeDisabledResolver(replacement.Key) {
+		if replacement, ok := c.balancer.GetBestConnectionExcluding(excludeKey); ok &&
+			!c.isRuntimeDisabledResolver(replacement.Key) && !c.pacer.paced(replacement.Key, now) {
 			return replacement, true
 		}
 	}
 
+	var pacedFallback Connection
+	var havePacedFallback bool
 	for _, connection := range c.balancer.GetAllValidConnections() {
 		if !connection.IsValid || connection.Key == "" {
 			continue
@@ -349,9 +353,21 @@ func (c *Client) selectAlternateStreamConnection(excludeKey string) (Connection,
 		if excludeKey != "" && connection.Key == excludeKey {
 			continue
 		}
+		// Prefer a resolver with headroom; remember a paced one only as a fallback
+		// so we never strand the stream when everything is briefly cooling down.
+		if c.pacer.paced(connection.Key, now) {
+			if !havePacedFallback {
+				pacedFallback = connection
+				havePacedFallback = true
+			}
+			continue
+		}
 		return connection, true
 	}
 
+	if havePacedFallback {
+		return pacedFallback, true
+	}
 	return Connection{}, false
 }
 
@@ -382,6 +398,16 @@ func (c *Client) assignStreamPreferredConnection(stream *Stream_client, connecti
 
 func (c *Client) ensureStreamPreferredConnection(stream *Stream_client) (Connection, bool) {
 	if preferred, ok := c.getValidStreamPreferredConnection(stream); ok {
+		// A stream pins one preferred resolver for ordered delivery, which bypasses
+		// the pacer's selection-time redistribution. If that resolver is now in a
+		// throttle cooldown, move the stream to one with headroom so a rate-limited
+		// resolver cannot pin a stream and hang its transfers. Bounded by the
+		// failover cooldown so this can't churn the preferred every packet.
+		if c.pacer.paced(preferred.Key, c.now()) && !c.streamFailedOverRecently(stream) {
+			if alt, ok := c.selectAlternateStreamConnection(preferred.Key); ok && alt.Key != preferred.Key {
+				return c.assignStreamPreferredConnection(stream, alt, true)
+			}
+		}
 		return preferred, true
 	}
 
@@ -392,6 +418,18 @@ func (c *Client) ensureStreamPreferredConnection(stream *Stream_client) (Connect
 		return c.assignStreamPreferredConnection(stream, fallback, false)
 	}
 	return Connection{}, false
+}
+
+// streamFailedOverRecently reports whether the stream switched its preferred
+// resolver within the failover cooldown, used to rate-limit re-selection.
+func (c *Client) streamFailedOverRecently(stream *Stream_client) bool {
+	if c == nil || stream == nil {
+		return false
+	}
+	stream.resolverMu.Lock()
+	last := stream.LastResolverFailoverAt
+	stream.resolverMu.Unlock()
+	return !last.IsZero() && time.Since(last) < c.streamResolverFailoverCooldown
 }
 
 func (c *Client) maybeFailoverStreamPreferredConnection(stream *Stream_client) (Connection, bool) {
