@@ -522,7 +522,7 @@ func (c *Client) ShortPrintBanner() {
 
 	c.log.Infof("============================================================")
 	c.log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
-	c.log.Infof("<cyan>Telegram:</cyan> <yellow>@CottenpickDNS</yellow>")
+	c.log.Infof("<cyan>Telegram:</cyan> <yellow>https://t.me/whitedns</yellow>")
 	c.log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	c.log.Infof("============================================================")
 }

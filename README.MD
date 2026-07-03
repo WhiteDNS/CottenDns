@@ -15,7 +15,7 @@
   <a href="README_FA.MD">فارسی</a> ·
   <a href="docs/ENGINEERING_CHANGES.md">Engineering Notes</a> ·
   <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">Latest Release</a> ·
-  <a href="https://t.me/nulllroute1970">Telegram Channel</a>
+  <a href="https://t.me/whitedns">Telegram Channel</a>
 </p>
 
 CottenDNS is a client/server tunneling system that moves TCP traffic through DNS queries and DNS responses. The client runs on the user's device and exposes a local SOCKS5 proxy or a raw TCP listener. Applications connect to that local listener like they would connect to any normal proxy. CottenDNS then splits each stream into small DNS-safe packets, applies optional compression and encryption, sends packets through one or more DNS resolvers, and reconstructs the stream on the remote CottenDNS server. The server finally opens the real outbound connection directly, through an optional upstream SOCKS5 proxy, or to a fixed TCP target depending on configuration.
@@ -807,25 +807,31 @@ Project links:
 | --- | --- |
 | Issues | <https://github.com/TaJirax/cottenpickDNS/issues> |
 | Pull requests | <https://github.com/TaJirax/cottenpickDNS/pulls> |
-| Telegram | <https://t.me/nulllroute1970> |
+| Telegram | <https://t.me/whitedns> |
 
 ## 📄 License
 
-CottenDNS is an independent fork/derivative of MasterDnsVPN.
+CottenDNS is an independent fork/derivative in the MasterDnsVPN family. This
+repository is maintained by `tajirax`; it preserves credit to the upstream Null
+Route work this fork came from and to the original Master DNS / MasterDnsVPN
+project.
 
-Original project:
+Project lineage:
 
 | Item | Value |
 | --- | --- |
-| Project | MasterDnsVPN |
+| Original project | Master DNS / MasterDnsVPN |
 | Original author | Amin Mahmoudi |
+| Upstream fork/source | Null Route / NullRoute1970 |
+| Current fork | CottenDNS / CottenpickDNS |
+| Current maintainer | tajirax |
 | License | MIT License |
 
 CottenDNS modifications:
 
 | Item | Value |
 | --- | --- |
-| Maintainer | NullRoute1970 |
+| Maintainer | tajirax |
 | License | MIT License |
 
 This project preserves the MIT License terms of the original project and adds independent modifications under the same license. See [LICENSE](LICENSE).

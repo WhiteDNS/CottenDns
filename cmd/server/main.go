@@ -65,7 +65,7 @@ func main() {
 
 	log.Infof("============================================================")
 	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
-	log.Infof("<cyan>Telegram:</cyan> <yellow>@nulllroute1970</yellow>")
+	log.Infof("<cyan>Telegram:</cyan> <yellow>https://t.me/whitedns</yellow>")
 	log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	log.Infof("============================================================")
 

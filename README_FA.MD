@@ -14,7 +14,7 @@
 <p align="center">
   <a href="README.MD">English</a> ·
   <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">آخرین Release</a> ·
-  <a href="https://t.me/nulllroute1970">کانال تلگرام</a>
+  <a href="https://t.me/whitedns">کانال تلگرام</a>
 </p>
 
 CottenDNS یک سیستم تونل client/server است که ترافیک TCP را از طریق query و responseهای DNS جابه‌جا می‌کند. کلاینت روی دستگاه کاربر اجرا می‌شود و یک SOCKS5 proxy محلی یا raw TCP listener ارائه می‌دهد. برنامه‌ها مثل یک proxy معمولی به این listener محلی وصل می‌شوند. سپس CottenDNS هر stream را به packetهای کوچک و سازگار با DNS تقسیم می‌کند، در صورت نیاز compression و encryption اعمال می‌کند، packetها را از طریق یک یا چند DNS resolver می‌فرستد و در سمت سرور CottenDNS stream را بازسازی می‌کند. سرور در پایان اتصال واقعی را مستقیم، از طریق SOCKS5 upstream اختیاری، یا به یک مقصد TCP ثابت باز می‌کند.
@@ -750,25 +750,30 @@ go vet ./...
 | --- | --- |
 | Issues | <https://github.com/TaJirax/cottenpickDNS/issues> |
 | Pull requests | <https://github.com/TaJirax/cottenpickDNS/pulls> |
-| Telegram | <https://t.me/nulllroute1970> |
+| Telegram | <https://t.me/whitedns> |
 
 ## 📄 مجوز
 
-CottenDNS یک fork/derivative مستقل از MasterDnsVPN است.
+CottenDNS یک fork/derivative مستقل در خانواده MasterDnsVPN است. این repository
+توسط `tajirax` نگهداری می‌شود و credit مربوط به کار upstream یعنی Null Route و
+پروژه اصلی Master DNS / MasterDnsVPN را حفظ می‌کند.
 
-پروژه اصلی:
+lineage پروژه:
 
 | مورد | مقدار |
 | --- | --- |
-| Project | MasterDnsVPN |
+| پروژه اصلی | Master DNS / MasterDnsVPN |
 | نویسنده اصلی | Amin Mahmoudi |
+| fork/source بالادستی | Null Route / NullRoute1970 |
+| fork فعلی | CottenDNS / CottenpickDNS |
+| نگهدارنده فعلی | tajirax |
 | License | MIT License |
 
 تغییرات CottenDNS:
 
 | مورد | مقدار |
 | --- | --- |
-| Maintainer | NullRoute1970 |
+| Maintainer | tajirax |
 | License | MIT License |
 
 این پروژه شرایط MIT License پروژه اصلی را حفظ می‌کند و تغییرات مستقل را تحت همان license اضافه می‌کند. فایل [LICENSE](LICENSE) را ببینید.
