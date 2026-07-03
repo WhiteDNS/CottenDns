@@ -7,12 +7,13 @@
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-00a36c?style=for-the-badge"></a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.25-00add8?style=for-the-badge&logo=go&logoColor=white">
-  <img alt="Transport" src="https://img.shields.io/badge/transport-DNS%20over%20UDP%2F53-4f46e5?style=for-the-badge">
+  <img alt="Transport" src="https://img.shields.io/badge/transport-DNS%20over%20UDP%2FTCP%2053-4f46e5?style=for-the-badge">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-f59e0b?style=for-the-badge">
 </p>
 
 <p align="center">
   <a href="README_FA.MD">فارسی</a> ·
+  <a href="docs/ENGINEERING_CHANGES.md">Engineering Notes</a> ·
   <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">Latest Release</a> ·
   <a href="https://t.me/nulllroute1970">Telegram Channel</a>
 </p>
@@ -31,6 +32,10 @@ Typical deployment is straightforward: run the server on a VPS with UDP/53 reach
 Recent work focused on staying usable on highly restrictive, lossy networks:
 
 - **DNS-over-TCP/53 fallback.** The server serves both UDP/53 and TCP/53 on the same port, and the client (`RESOLVER_TRANSPORT = auto`) probes over UDP first, then transparently re-probes the **whole fleet over TCP/53** if UDP finds no resolvers — surviving networks that filter or truncate UDP/53. Zero cost when UDP works. Every response channel (TXT/CNAME/A/NULL/HTTPS) works over TCP too.
+- **TCP survival-path guardrails.** TCP/53 is treated as a first-class fallback path: per-IP connection caps, optional per-connection query limits, read-idle timeouts, and write deadlines protect the listener while keeping persistent DNS-over-TCP useful.
+- **Paired config presets.** Bundled client/server pairs (`speed`, `survival`, `tcp-survival`) tune both sides together through `CONFIG_PRESET`, while explicit TOML/CLI values still override the profile.
+- **More honest MTU loss reporting.** Loss-aware MTU probing now reports failures against the configured sample budget, so scans can show intermediate loss percentages instead of collapsing early rejects into only `0%` or `100%`.
+- **Crypto-grade cheap DNS randomness.** DNS transaction-ID randomization and EDNS client-cookie generation now use `crypto/rand` with fallback, improving spoofing hardness and making query shaping closer to modern resolver behavior.
 - **Intelligent rate limiting.** A resolver that signals overload (REFUSED/SERVFAIL or timeouts) is briefly cooled down (AIMD) and its load shifts to resolvers with headroom — redistribution, not a global throttle. It's self-gating (does nothing to healthy resolvers), never idles, and avoids tripping resolver/IP rate-limit blocks.
 - **QNAME reshaping.** `QNAME_LABEL_LENGTH` lays the payload into shorter, jittered DNS labels instead of one chain of uniform 63-char labels — a lower-fingerprint knob. Server-transparent (the server reassembles labels regardless), so it can't desync; default keeps maximal capacity.
 - **Adaptive per-group MTU.** Instead of forcing the slowest resolver's MTU on everyone, the client runs the session at the throughput-optimal operating point — the MTU that maximizes `MTU × resolvers that sustain it`, jointly over upload and download. Slower resolvers are kept as **reserves** and promoted automatically (with hysteresis) if the active pool degrades.
@@ -49,6 +54,7 @@ Recent work focused on staying usable on highly restrictive, lossy networks:
 | ⚙️ Configuration | [Configuration Overview](#configuration-overview), [Current Config Keys](#current-config-keys) |
 | 📡 Resolver and MTU tuning | [Resolver, MTU, And Loss Tuning](#resolver-mtu-and-loss-tuning) |
 | 🧱 Architecture | [Architecture](#architecture) |
+| 🧾 Engineering details | [Engineering Notes](docs/ENGINEERING_CHANGES.md) |
 | 🧯 Problems and fixes | [Troubleshooting](#troubleshooting) |
 | 🧑‍💻 Development | [Development](#development) |
 
@@ -65,6 +71,7 @@ Recent work focused on staying usable on highly restrictive, lossy networks:
 | 🧪 Resolver behavior is inconsistent | Per-resolver MTU validation, adaptive per-group operating MTU, active/reserve/invalid tiers, and MTU-weighted balancing |
 | 🚧 UDP/53 is filtered or truncated | Automatic fallback to DNS-over-TCP/53 (same server port) for the whole tunnel — probe, session, and data plane |
 | 🧱 DPI/protocol filtering is common | DNS-only transport over ordinary UDP/53 (or TCP/53) query/response flow, rotating query types (TXT/CNAME/A/NULL/HTTPS/…), type-matched responses, QNAME label reshaping, and duplication spread across multiple domains |
+| 🧪 DNS injection/spoofing happens | Randomized query IDs, EDNS client cookies, and injected-NXDOMAIN ignore logic keep working resolvers from being falsely penalized |
 | 🔐 Key/method policy varies per client | Server auto-detects the client's encryption method, so a client can change it without server reconfiguration |
 
 ## ✨ Main Capabilities
@@ -77,9 +84,9 @@ Recent work focused on staying usable on highly restrictive, lossy networks:
 | 🔁 Reliability | ARQ, ACK/NACK, RTO, retry limits, stream cleanup, packed controls; download-path Reed-Solomon FEC, always-on (`FEC_DOWNLOAD_ENABLED`) or loss-triggered/auto (`FEC_AUTO_ENABLED`) |
 | 📦 Efficiency | MTU discovery, packet packing, optional base encoding, ZSTD/LZ4/ZLIB |
 | 🕵️ Anti-fingerprinting | Query-type rotation (`QUERY_TYPES`), server-accepted-by-default response RR-type matching (TXT→TXT, NULL→NULL, HTTPS/SVCB→service-binding, A→A-records, others→CNAME with TXT fallback), QNAME label reshaping (`QNAME_LABEL_LENGTH`), domain-diverse packet duplication (`DUPLICATION_PREFER_DISTINCT_DOMAINS`) |
-| 🔐 Security | None, XOR, ChaCha20, AES-128-GCM, AES-192-GCM, AES-256-GCM; server-side encryption-method auto-detection (`ENCRYPTION_AUTO_DETECT`) |
+| 🔐 Security | None, XOR, ChaCha20, AES-128-GCM, AES-192-GCM, AES-256-GCM; server-side encryption-method auto-detection (`ENCRYPTION_AUTO_DETECT`); crypto-backed DNS query IDs and EDNS cookies |
 | 📛 DNS features | Optional client-side local DNS listener/cache and server-side upstream DNS/cache |
-| 🧰 Operations | Linux systemd installers, CLI overrides, cross-platform release workflow |
+| 🧰 Operations | Paired config presets, Linux systemd installers, CLI overrides, cross-platform release workflow |
 | 🧪 Testing | Standard Go tests across client, server, ARQ, config, DNS, protocol, and utility packages |
 
 ## 🗂️ Repository Map
@@ -100,6 +107,7 @@ Recent work focused on staying usable on highly restrictive, lossy networks:
 | `internal/dnscache` | DNS cache storage |
 | `internal/fragmentstore` | Fragment assembly storage |
 | `scripts/bench` | Local integration benchmark helper |
+| `docs/ENGINEERING_CHANGES.md` | Technical design notes and engineering-change log |
 | `.github/workflows/build-go.yml` | Manual release workflow and artifact packaging |
 
 <a id="quick-start"></a>
@@ -252,8 +260,13 @@ The deployed `server_config.toml` ships with these optional knobs (all safe defa
 
 | Key | Default | Purpose |
 | --- | --- | --- |
+| `CONFIG_PRESET` | `default` | Optional paired profile: `speed`, `survival`, or `tcp-survival` |
+| `TCP_LISTENER_ENABLED` | `true` | Serve DNS-over-TCP/53 on the same host:port as UDP/53 |
+| `TCP_MAX_CONNS_PER_IP` | `128` | Cap concurrent TCP/53 connections from one client IP |
+| `TCP_MAX_QUERIES_PER_CONN` | `0` | Optional per-connection query cap; `0` means unlimited persistent TCP |
 | `ENCRYPTION_AUTO_DETECT` | `true` | Accept whichever encryption method the client uses (trial-decrypt) without reconfiguring the server |
 | `A_RECORD_DATA_DELIVERY` | `false` | Answer `A`-type tunnel queries with IPv4 A-record data (supplementary channel) |
+| `FEC_AUTO_ENABLED` | `true` | Turn download FEC on automatically once a stream shows loss |
 | `FEC_DOWNLOAD_ENABLED` | `false` | Reed-Solomon FEC on the download path for high-loss links; pair with `FEC_BLOCK_SIZE`/`FEC_PARITY` (e.g. `4`/`12` to ride out ~75% loss) |
 
 NULL and HTTPS/SVCB response channels need no server config — the server auto-accepts every query type the client rotates over (`QUERY_TYPES`) and answers with the matching record.
@@ -294,7 +307,9 @@ Client release archives include:
 | --- | --- |
 | `CottenDNS_Client_*` | Client executable |
 | `client_config.toml` | Client config template |
+| `client_config.speed.toml` / `client_config.survival.toml` / `client_config.tcp-survival.toml` | Paired client presets |
 | `client_resolvers.txt` | Resolver list template |
+| `CONFIG_PRESETS.md` | Preset selection notes |
 | `client_linux_install.sh` | Linux systemd installer, Linux archives only |
 
 Minimum client edits:
@@ -367,6 +382,18 @@ CottenDNS uses TOML configuration files. There are no environment-variable confi
 | Encryption method | `DATA_ENCRYPTION_METHOD` | `DATA_ENCRYPTION_METHOD` | Need not match when the server has `ENCRYPTION_AUTO_DETECT = true` (default): the server detects the client's method automatically. The server value is just the method it tries first. |
 | Encryption key | `ENCRYPTION_KEY` | contents of `ENCRYPTION_KEY_FILE` | Must match. Server creates/loads the key file; one key works across all methods. |
 
+### 🧭 Paired Presets
+
+For common network conditions, use matching client/server files from the release archive:
+
+| Preset | Pair | Use When |
+| --- | --- | --- |
+| `speed` | `client_config.speed.toml` + `server_config.speed.toml` | DNS path is usable and you want lower duplicate traffic plus higher throughput |
+| `survival` | `client_config.survival.toml` + `server_config.survival.toml` | UDP/53 works but the network is lossy, restrictive, or unstable |
+| `tcp-survival` | `client_config.tcp-survival.toml` + `server_config.tcp-survival.toml` | TCP/53 is the main reliable path |
+
+The underlying key is `CONFIG_PRESET`. Presets are a base layer only: any explicit TOML value or CLI override still wins.
+
 ### 🔒 Encryption Methods
 
 | ID | Method | Practical Notes |
@@ -384,8 +411,10 @@ With `ENCRYPTION_AUTO_DETECT = true` (server default) the server builds a codec 
 
 | Feature | Key (side) | Behavior |
 | --- | --- | --- |
-| Query-type rotation | `QUERY_TYPES` (client) | Rotates the DNS record type per query over a configurable set (e.g. `["TXT","CNAME","A","AAAA"]`); payload always rides in the query name, so the server accepts any of them. Unset = TXT only. |
-| Response type matching | automatic (server) | TXT queries get TXT answers; other query types get a CNAME answer (with automatic TXT fallback when the payload exceeds a single DNS name). |
+| Query-type rotation | `QUERY_TYPES` (client) | Rotates the DNS record type per query over a configurable set (e.g. `["TXT","CNAME","NULL","HTTPS"]`); payload always rides in the query name, so the server accepts any of them. Unset = TXT only. |
+| Response type matching | automatic (server) | TXT queries get TXT answers, NULL gets NULL RDATA, HTTPS/SVCB gets service-binding data, A can use A-record delivery, and CNAME/other types use CNAME with TXT fallback when needed. |
+| DNS query shaping | `DNS_RANDOMIZE_QUERY_ID`, `DNS_EDNS_COOKIE`, `DNS_QNAME_CASE_RANDOMIZATION`, `EDNS_UDP_SIZE` (client) | Randomizes transaction IDs, can add EDNS client cookies, optionally applies 0x20 mixed-case QNAMEs, and controls advertised EDNS UDP size. Server-transparent. |
+| Injection hardening | `RESOLVER_IGNORE_INJECTED_NXDOMAIN` (client) | Ignores forged payloadless NXDOMAIN responses for resolver scoring so a censor cannot cheaply disable working resolvers. |
 | Domain-diverse duplication | `DUPLICATION_PREFER_DISTINCT_DOMAINS` (client) | Sends the duplicate copies of a packet across distinct tunnel domains where possible, for independent delivery paths and spread query volume. No effect with a single domain or duplication count `1`. |
 
 ### 📦 Compression Methods
@@ -405,6 +434,7 @@ With `ENCRYPTION_AUTO_DETECT = true` (server default) the server builds a codec 
 | `2` | Round-robin | Even rotation |
 | `3` | Least loss | Uses runtime feedback to avoid lossy paths |
 | `4` | Lowest latency | Uses runtime feedback to prefer faster paths |
+| `5` | MTU-weighted | Sends more traffic to active resolvers with larger measured download MTU |
 
 ### 🚦 Startup Modes
 
@@ -424,18 +454,21 @@ The sample files are the source of truth for defaults and operational comments:
 | --- | --- |
 | `client_config.toml.simple` | Current client config template |
 | `server_config.toml.simple` | Current server config template |
+| `client_config.*.toml` / `server_config.*.toml` | Paired preset configs (`speed`, `survival`, `tcp-survival`) |
+| `CONFIG_PRESETS.md` | Preset selection notes |
 | `client_resolvers.simple` | Resolver list example |
 
 ### 📘 Client Config Key Groups
 
 | Group | Keys |
 | --- | --- |
-| 🪪 Tunnel identity/security | `DOMAINS`, `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_KEY`, `QUERY_TYPES` |
+| 🧭 Presets | `CONFIG_PRESET` |
+| 🪪 Tunnel identity/security | `DOMAINS`, `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_KEY`, `QUERY_TYPES`, `DNS_RANDOMIZE_QUERY_ID`, `DNS_EDNS_COOKIE`, `DNS_QNAME_CASE_RANDOMIZATION`, `EDNS_UDP_SIZE`, `RESOLVER_IGNORE_INJECTED_NXDOMAIN` |
 | 🧦 Local proxy | `PROTOCOL_TYPE`, `LISTEN_IP`, `LISTEN_PORT`, `SOCKS5_AUTH`, `SOCKS5_USER`, `SOCKS5_PASS` |
 | 📛 Local DNS | `LOCAL_DNS_ENABLED`, `LOCAL_DNS_IP`, `LOCAL_DNS_PORT`, `LOCAL_DNS_CACHE_MAX_RECORDS`, `LOCAL_DNS_CACHE_TTL_SECONDS`, `LOCAL_DNS_PENDING_TIMEOUT_SECONDS`, `DNS_RESPONSE_FRAGMENT_TIMEOUT_SECONDS`, `LOCAL_DNS_CACHE_PERSIST_TO_FILE`, `LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS` |
-| 📡 Resolver/loss handling | `RESOLVER_BALANCING_STRATEGY`, `UPLOAD_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_PACKET_DUPLICATION_COUNT`, `UPLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `STREAM_RESOLVER_FAILOVER_RESEND_THRESHOLD`, `STREAM_RESOLVER_FAILOVER_COOLDOWN`, `RECHECK_INACTIVE_SERVERS_ENABLED`, `RECHECK_INACTIVE_INTERVAL_SECONDS`, `RECHECK_SERVER_INTERVAL_SECONDS`, `RECHECK_BATCH_SIZE`, `AUTO_DISABLE_TIMEOUT_SERVERS`, `AUTO_DISABLE_TIMEOUT_WINDOW_SECONDS`, `AUTO_DISABLE_MIN_OBSERVATIONS`, `AUTO_DISABLE_CHECK_INTERVAL_SECONDS`, `BASE_ENCODE_DATA`, `DUPLICATION_PREFER_DISTINCT_DOMAINS` |
+| 📡 Resolver/loss handling | `RESOLVER_TRANSPORT`, `RESOLVER_BALANCING_STRATEGY`, `RESOLVER_RATE_LIMIT_ENABLED`, `UPLOAD_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_PACKET_DUPLICATION_COUNT`, `UPLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT`, `STREAM_RESOLVER_FAILOVER_RESEND_THRESHOLD`, `STREAM_RESOLVER_FAILOVER_COOLDOWN`, `RECHECK_INACTIVE_SERVERS_ENABLED`, `RECHECK_INACTIVE_INTERVAL_SECONDS`, `RECHECK_SERVER_INTERVAL_SECONDS`, `RECHECK_BATCH_SIZE`, `AUTO_DISABLE_TIMEOUT_SERVERS`, `AUTO_DISABLE_TIMEOUT_WINDOW_SECONDS`, `AUTO_DISABLE_MIN_OBSERVATIONS`, `AUTO_DISABLE_CHECK_INTERVAL_SECONDS`, `BASE_ENCODE_DATA`, `DUPLICATION_PREFER_DISTINCT_DOMAINS`, `ADAPTIVE_DUPLICATION`, `ADAPTIVE_DUPLICATION_TARGET_DELIVERY` |
 | 📦 Compression | `UPLOAD_COMPRESSION_TYPE`, `DOWNLOAD_COMPRESSION_TYPE`, `COMPRESSION_MIN_SIZE` |
-| 📏 MTU discovery | `MIN_UPLOAD_MTU`, `MIN_DOWNLOAD_MTU`, `MAX_UPLOAD_MTU`, `MAX_DOWNLOAD_MTU`, `MTU_TEST_RETRIES_RESOLVERS`, `MTU_TEST_TIMEOUT_RESOLVERS`, `MTU_TEST_PARALLELISM_RESOLVERS`, `MTU_TEST_RETRIES_LOGS`, `MTU_TEST_TIMEOUT_LOGS`, `MTU_TEST_PARALLELISM_LOGS` |
+| 📏 MTU discovery | `MIN_UPLOAD_MTU`, `MIN_DOWNLOAD_MTU`, `MAX_UPLOAD_MTU`, `MAX_DOWNLOAD_MTU`, `MTU_TEST_RETRIES_RESOLVERS`, `MTU_TEST_TIMEOUT_RESOLVERS`, `MTU_TEST_PARALLELISM_RESOLVERS`, `MTU_TEST_RETRIES_LOGS`, `MTU_TEST_TIMEOUT_LOGS`, `MTU_TEST_PARALLELISM_LOGS`, `MTU_PROBE_SAMPLES`, `MTU_MAX_LOSS`, `MTU_GROUP_GAP_RATIO`, `MTU_ADAPTIVE_GROUPING` |
 | ⚙️ Workers/queues/timers | `RX_TX_WORKERS`, `TUNNEL_PROCESS_WORKERS`, `TUNNEL_PACKET_TIMEOUT_SECONDS`, `DISPATCHER_IDLE_POLL_INTERVAL_SECONDS`, `TX_CHANNEL_SIZE`, `RX_CHANNEL_SIZE`, `RESOLVER_UDP_CONNECTION_POOL_SIZE`, `STREAM_QUEUE_INITIAL_CAPACITY`, `ORPHAN_QUEUE_INITIAL_CAPACITY`, `DNS_RESPONSE_FRAGMENT_STORE_CAPACITY`, `SOCKS_UDP_ASSOCIATE_READ_TIMEOUT_SECONDS`, `CLIENT_TERMINAL_STREAM_RETENTION_SECONDS`, `CLIENT_CANCELLED_SETUP_RETENTION_SECONDS` |
 | 🔄 Session init/ping | `SESSION_INIT_RETRY_BASE_SECONDS`, `SESSION_INIT_RETRY_STEP_SECONDS`, `SESSION_INIT_RETRY_LINEAR_AFTER`, `SESSION_INIT_RETRY_MAX_SECONDS`, `SESSION_INIT_BUSY_RETRY_INTERVAL_SECONDS`, `PING_AGGRESSIVE_INTERVAL_SECONDS`, `PING_LAZY_INTERVAL_SECONDS`, `PING_COOLDOWN_INTERVAL_SECONDS`, `PING_COLD_INTERVAL_SECONDS`, `PING_WARM_THRESHOLD_SECONDS`, `PING_COOL_THRESHOLD_SECONDS`, `PING_COLD_THRESHOLD_SECONDS`, `PING_WATCHDOG_TIMEOUT_SECONDS` |
 | 🔁 ARQ/packing | `MAX_PACKETS_PER_BATCH`, `ARQ_WINDOW_SIZE`, `ARQ_INITIAL_RTO_SECONDS`, `ARQ_MAX_RTO_SECONDS`, `ARQ_CONTROL_INITIAL_RTO_SECONDS`, `ARQ_CONTROL_MAX_RTO_SECONDS`, `ARQ_MAX_CONTROL_RETRIES`, `ARQ_INACTIVITY_TIMEOUT_SECONDS`, `ARQ_DATA_PACKET_TTL_SECONDS`, `ARQ_CONTROL_PACKET_TTL_SECONDS`, `ARQ_MAX_DATA_RETRIES`, `ARQ_DATA_NACK_MAX_GAP`, `ARQ_DATA_NACK_INITIAL_DELAY_SECONDS`, `ARQ_DATA_NACK_REPEAT_SECONDS`, `ARQ_TERMINAL_DRAIN_TIMEOUT_SECONDS`, `ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS` |
@@ -445,13 +478,15 @@ The sample files are the source of truth for defaults and operational comments:
 
 | Group | Keys |
 | --- | --- |
-| 🪪 Tunnel policy | `DOMAIN`, `PROTOCOL_TYPE`, `SUPPORTED_UPLOAD_COMPRESSION_TYPES`, `SUPPORTED_DOWNLOAD_COMPRESSION_TYPES` |
-| 🚪 UDP listener/capacity | `UDP_HOST`, `UDP_PORT`, `UDP_READERS`, `DNS_REQUEST_WORKERS`, `MAX_CONCURRENT_REQUESTS`, `SOCKET_BUFFER_SIZE`, `MAX_PACKET_SIZE`, `DROP_LOG_INTERVAL_SECONDS` |
+| 🧭 Presets | `CONFIG_PRESET` |
+| 🪪 Tunnel policy | `DOMAIN`, `PROTOCOL_TYPE`, `SUPPORTED_UPLOAD_COMPRESSION_TYPES`, `SUPPORTED_DOWNLOAD_COMPRESSION_TYPES`, `MIN_VPN_LABEL_LENGTH`, `A_RECORD_DATA_DELIVERY` |
+| 🚪 UDP/TCP listener/capacity | `UDP_HOST`, `UDP_PORT`, `UDP_READERS`, `TCP_LISTENER_ENABLED`, `TCP_MAX_CONNS`, `TCP_MAX_CONNS_PER_IP`, `TCP_MAX_QUERIES_PER_CONN`, `TCP_READ_IDLE_TIMEOUT_SECONDS`, `TCP_WRITE_TIMEOUT_SECONDS`, `DNS_REQUEST_WORKERS`, `MAX_CONCURRENT_REQUESTS`, `SOCKET_BUFFER_SIZE`, `MAX_PACKET_SIZE`, `DROP_LOG_INTERVAL_SECONDS` |
 | 🧵 Deferred runtime/queues | `DEFERRED_SESSION_WORKERS`, `DEFERRED_SESSION_QUEUE_LIMIT`, `SESSION_ORPHAN_QUEUE_INITIAL_CAPACITY`, `STREAM_QUEUE_INITIAL_CAPACITY`, `DNS_FRAGMENT_STORE_CAPACITY`, `SOCKS5_FRAGMENT_STORE_CAPACITY`, `MAX_STREAMS_PER_SESSION`, `MAX_DNS_RESPONSE_BYTES` |
 | 🧹 Session lifecycle | `INVALID_COOKIE_WINDOW_SECONDS`, `INVALID_COOKIE_ERROR_THRESHOLD`, `SESSION_TIMEOUT_SECONDS`, `SESSION_CLEANUP_INTERVAL_SECONDS`, `CLOSED_SESSION_RETENTION_SECONDS`, `SESSION_INIT_REUSE_TTL_SECONDS`, `RECENTLY_CLOSED_STREAM_TTL_SECONDS`, `RECENTLY_CLOSED_STREAM_CAP`, `TERMINAL_STREAM_RETENTION_SECONDS` |
 | 📛 DNS upstream/cache | `DNS_UPSTREAM_SERVERS`, `DNS_UPSTREAM_TIMEOUT`, `DNS_INFLIGHT_WAIT_TIMEOUT_SECONDS`, `DNS_FRAGMENT_ASSEMBLY_TIMEOUT`, `DNS_CACHE_MAX_RECORDS`, `DNS_CACHE_TTL_SECONDS` |
 | 🌍 Outbound path | `SOCKS_CONNECT_TIMEOUT`, `USE_EXTERNAL_SOCKS5`, `SOCKS5_AUTH`, `SOCKS5_USER`, `SOCKS5_PASS`, `FORWARD_IP`, `FORWARD_PORT` |
 | 🔐 Security | `DATA_ENCRYPTION_METHOD`, `ENCRYPTION_AUTO_DETECT`, `ENCRYPTION_KEY_FILE` |
+| 📉 Download FEC | `FEC_DOWNLOAD_ENABLED`, `FEC_BLOCK_SIZE`, `FEC_PARITY`, `FEC_AUTO_ENABLED`, `FEC_AUTO_LOSS_THRESHOLD`, `FEC_AUTO_MAX_PARITY` |
 | 🔁 ARQ/packing | `MAX_PACKETS_PER_BATCH`, `PACKET_BLOCK_CONTROL_DUPLICATION`, `STREAM_SETUP_ACK_TTL_SECONDS`, `STREAM_RESULT_PACKET_TTL_SECONDS`, `STREAM_FAILURE_PACKET_TTL_SECONDS`, `ARQ_WINDOW_SIZE`, `ARQ_INITIAL_RTO_SECONDS`, `ARQ_MAX_RTO_SECONDS`, `ARQ_CONTROL_INITIAL_RTO_SECONDS`, `ARQ_CONTROL_MAX_RTO_SECONDS`, `ARQ_MAX_CONTROL_RETRIES`, `ARQ_INACTIVITY_TIMEOUT_SECONDS`, `ARQ_DATA_PACKET_TTL_SECONDS`, `ARQ_CONTROL_PACKET_TTL_SECONDS`, `ARQ_MAX_DATA_RETRIES`, `ARQ_DATA_NACK_MAX_GAP`, `ARQ_DATA_NACK_INITIAL_DELAY_SECONDS`, `ARQ_DATA_NACK_REPEAT_SECONDS`, `ARQ_TERMINAL_DRAIN_TIMEOUT_SECONDS`, `ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS` |
 | 📝 Logging/metadata | `LOG_LEVEL`, `CONFIG_VERSION` |
 
@@ -630,7 +665,7 @@ CottenDNS_Server_<Platform>_<ARCH>.zip
 CottenDNS_Server_<Platform>_<ARCH>.tar.gz
 ```
 
-The GitHub Actions release matrix includes Windows, Linux, Linux-Legacy, macOS, and Termux/Android targets. Client packages include the executable, `client_config.toml`, and `client_resolvers.txt`. Linux client packages also include `client_linux_install.sh`. Server packages include the executable and `server_config.toml`.
+The GitHub Actions release matrix includes Windows, Linux, Linux-Legacy, macOS, and Termux/Android targets. Client packages include the executable, `client_config.toml`, paired `client_config.*.toml` presets, `client_resolvers.txt`, and `CONFIG_PRESETS.md`. Linux client packages also include `client_linux_install.sh`. Server packages include the executable, `server_config.toml`, paired `server_config.*.toml` presets, and `CONFIG_PRESETS.md`.
 
 <a id="development"></a>
 

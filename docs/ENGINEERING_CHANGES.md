@@ -235,6 +235,18 @@ it early-exits a candidate the moment the verdict is locked — once enough
 successes make the loss budget unbeatable, or once failures exceed it — instead
 of always sending all K probes.
 
+**Loss reporting fix.** Early-exit probing must not make the UI lie. A candidate
+can be rejected after the first failed probe when the configured loss budget is
+zero; reporting `failures / sampled` made that look like **100% loss** even when
+the configured budget was, for example, 1 failure out of 6 probes. The client now
+reports `failures / MTU_PROBE_SAMPLES` for loss-aware candidates while keeping the
+same early-stop verdict. That preserves fast startup and lets operators see
+intermediate values (16.7%, 25%, 40%, ...) instead of only 0%/100%.
+
+**Caveat.** `MTU_PROBE_SAMPLES = 1` intentionally keeps the legacy pass/fail
+mode, so it can still only report 0% on pass or 100% on failure. Meaningful loss
+percentages require `MTU_PROBE_SAMPLES > 1`.
+
 ### 7.2 Throughput-optimal operating point (joint upload+download)
 Instead of the global minimum, the client picks the operating point that
 maximizes aggregate throughput. For each resolver's own `(upload, download)` as a
@@ -361,6 +373,14 @@ encryption) is shared with UDP, no duplication.
 what is faster. Because TCP wraps the whole DNS message, **every response channel
 (TXT/CNAME/A/NULL/HTTPS) works unchanged over TCP** — validated end-to-end.
 
+**Survival-path hardening.** The TCP listener now has explicit guardrails for
+long-lived fallback use: `TCP_MAX_CONNS_PER_IP`, `TCP_MAX_QUERIES_PER_CONN`,
+`TCP_READ_IDLE_TIMEOUT_SECONDS`, and `TCP_WRITE_TIMEOUT_SECONDS`. The defaults
+keep persistent DNS-over-TCP useful (`TCP_MAX_QUERIES_PER_CONN = 0` means
+unlimited) while bounding connection floods and idle clients. This is important
+because TCP/53 is not a secondary convenience path in censored networks; it may
+be the only viable transport.
+
 ---
 
 ## 11. Intelligent rate limiting (redistribution, not a global throttle)
@@ -430,17 +450,57 @@ fallback keeps the tunnel alive when UDP/53 is filtered.
 
 ---
 
-## 14. Validation summary
+## 14. Paired operational presets
+
+**Problem.** Operators had to hand-tune many interacting knobs for different
+network conditions. That is error-prone: a "fast" client profile can accidentally
+request compression or packet behavior the server does not allow, and a
+TCP-heavy client can be paired with a server config that is not tuned for
+long-lived DNS-over-TCP connections.
+
+**Mechanism.** Both config loaders now understand `CONFIG_PRESET`, with the same
+valid names on both sides:
+
+| Preset | Client intent | Server intent |
+|---|---|---|
+| `default` | Existing explicit config values | Existing explicit config values |
+| `speed` | Lower base duplication, MTU-weighted selection, LZ4, loss-aware MTU probing | Higher request/batch headroom, all compression types allowed, auto-FEC threshold tuned for moderate loss |
+| `survival` | More duplication, smaller QNAME/EDNS shape, lower MTU ceilings, stricter loss-aware probing | Earlier auto-FEC, duplicated control blocks, longer TCP idle tolerance |
+| `tcp-survival` | Force `RESOLVER_TRANSPORT = "tcp"` and keep duplication modest for persistent TCP/53 | Keep TCP listener enabled with higher connection caps and longer idle timeout |
+
+Preset application is **non-destructive**: explicit values in the TOML file (or
+CLI overrides) win over preset defaults. That means a bundled preset can be used
+as a base profile while still letting an operator override one knob safely.
+
+**Bundled pairs.**
+
+```
+client_config.speed.toml        + server_config.speed.toml
+client_config.survival.toml     + server_config.survival.toml
+client_config.tcp-survival.toml + server_config.tcp-survival.toml
+```
+
+The release packagers include these files plus `CONFIG_PRESETS.md`, so the
+profiles are available in built artifacts, not only in the source tree.
+
+**Validation.** Config tests cover preset parsing, explicit-value precedence,
+CLI/override preset application, and all bundled preset TOML files. The shipped
+template test accepts the expected placeholder client-key error but fails if any
+preset is malformed before that point.
+
+---
+
+## 15. Validation summary
 
 - **Unit tests** across `fec`, `vpnproto`, `dnsparser`, `udpserver`, `client`,
   `config` — including FEC reconstruction at 75% loss, auto-FEC enable/scale on
   loss, joint operating-point selection, reserve promotion, hysteresis, hybrid
-  cache selection, MTU-weighted bias, the transport channels, the AIMD pacer
-  (throttle/recover, redistribution ordering), TCP framing, and QNAME-shaping
-  round-trip/bounds.
+  cache selection, MTU-weighted bias, loss-aware MTU reporting, the transport
+  channels, the AIMD pacer (throttle/recover, redistribution ordering), TCP
+  framing, config presets, and QNAME-shaping round-trip/bounds.
 - **Server-side validation** that the server honors and clamps the client's
   per-session MTU (including a lowered value re-derived after primary-pool loss),
-  and the DNS-over-TCP framing/pipelining.
+  the DNS-over-TCP framing/pipelining, and TCP connection guardrails.
 - **End-to-end tests** (real client + server binaries over loopback), each a
   byte-exact 64 KB echo: baseline; encryption auto-detect; FEC-on download;
   query-type rotation over the new channels (UDP); full tunnel over **TCP/53**;
@@ -451,10 +511,15 @@ fallback keeps the tunnel alive when UDP/53 is filtered.
 
 ---
 
-## 15. Config quick reference (new/changed keys)
+## 16. Config quick reference (new/changed keys)
 
 **Server (`server_config.toml`):**
 - `TCP_LISTENER_ENABLED` (true) / `TCP_MAX_CONNS` (2048) — DNS-over-TCP/53 listener.
+- `TCP_MAX_CONNS_PER_IP` (128) / `TCP_MAX_QUERIES_PER_CONN` (0) /
+  `TCP_READ_IDLE_TIMEOUT_SECONDS` (30.0) / `TCP_WRITE_TIMEOUT_SECONDS` (15.0) —
+  TCP/53 survival-path guardrails.
+- `CONFIG_PRESET` (`default`, `speed`, `survival`, `tcp-survival`) — paired
+  operational profile; explicit TOML/CLI values still win.
 - `ENCRYPTION_AUTO_DETECT` (true) — trial-decrypt the client's cipher.
 - `A_RECORD_DATA_DELIVERY` (false) — answer A queries with A-record data.
 - `FEC_DOWNLOAD_ENABLED` (false) / `FEC_BLOCK_SIZE` (4) / `FEC_PARITY` (4) —
@@ -463,6 +528,8 @@ fallback keeps the tunnel alive when UDP/53 is filtered.
   `FEC_AUTO_MAX_PARITY` (0=auto) — loss-triggered FEC.
 
 **Client (`client_config.toml`):**
+- `CONFIG_PRESET` (`default`, `speed`, `survival`, `tcp-survival`) — paired
+  operational profile; explicit TOML/CLI values still win.
 - `RESOLVER_TRANSPORT` (auto) — `auto` (UDP, fall back to TCP/53 if UDP finds no
   resolvers) | `udp` | `tcp`.
 - `RESOLVER_RATE_LIMIT_ENABLED` (true) — per-resolver adaptive pacing.
