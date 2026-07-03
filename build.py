@@ -47,7 +47,7 @@ def build(goos, goarch, goarm, component, output_name, require_cgo=False):
             return "skipped"
     
     version = get_version()
-    ldflags = f"-s -w -X cottenpickdns-go/internal/version.BuildVersion={version}"
+    ldflags = f"-s -w -X cottendns-go/internal/version.BuildVersion={version}"
     
     cmd = [
         "go", "build",

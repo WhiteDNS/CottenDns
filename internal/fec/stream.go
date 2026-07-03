@@ -1,7 +1,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 // stream.go — stateful FEC layer that bridges a stream of data packets and the

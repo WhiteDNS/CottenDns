@@ -1,5 +1,5 @@
 # ==============================================================================
-# CottenpickDNS Go Server Configuration (Sample)
+# CottenDns Go Server Configuration (Sample)
 # This sample is written for the current Go server implementation.
 # Comments below describe the real Go code paths, not the legacy Python server.
 # ==============================================================================

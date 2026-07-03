@@ -1,7 +1,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 // fec_unit.go — serialization of a single STREAM_DATA element carried inside a

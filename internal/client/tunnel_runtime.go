@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the CottenpickDNS client.
+// Package client provides the core logic for the CottenDns client.
 // This file (tunnel_runtime.go) handles low-level UDP network operations,
 // including sending DNS-encapsulated packets and receiving responses.
 // ==============================================================================

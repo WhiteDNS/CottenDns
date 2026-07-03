@@ -1,7 +1,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 // shipped_templates_test.go — guards the config templates that the one-line

@@ -1,7 +1,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 // transport_cname.go — A2 response-type matching. When a tunnel query uses a

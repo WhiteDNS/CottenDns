@@ -18,7 +18,7 @@
 <p align="center">
   <a href="README_FA.MD">فارسی</a> ·
   <a href="docs/ENGINEERING_CHANGES.md">Engineering Notes</a> ·
-  <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">Latest Release</a> ·
+  <a href="https://github.com/TaJirax/CottenDns/releases/latest">Latest Release</a> ·
   <a href="https://t.me/whitedns">Telegram Channel</a>
 </p>
 
@@ -130,7 +130,7 @@ v.example.com   NS  ns.example.com
 ### 2. Install Server
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
 ```
 
 After startup, the server prints the active encryption key and writes it to `encrypt_key.txt`.
@@ -164,6 +164,9 @@ Add resolvers to `client_resolvers.txt`:
 ```bash
 ./CottenDns_Client_Linux_AMD64 --config client_config.toml
 ```
+
+> [!TIP]
+> Release binaries carry the version tag in the file name, e.g. `CottenDns_Client_Linux_AMD64_v2026.01.01.120000-abcdef0`. Adjust the command to the actual file name from your extracted archive.
 
 Then configure your browser or app:
 
@@ -218,7 +221,7 @@ Short labels matter. A shorter domain leaves more room for payload inside the DN
 Run on the remote Linux server:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
 ```
 
 The installer:
@@ -231,7 +234,7 @@ The installer:
 | 🔥 Firewall | Opens DNS port `53` where supported by the host firewall tool |
 | ⚙️ Tuning | Applies UDP, socket buffer, file descriptor, and systemd limits |
 | 🔑 Key | Starts the server once to generate `encrypt_key.txt` |
-| 🧰 Service | Installs and starts the `cottenpickdns` systemd service |
+| 🧰 Service | Installs and starts the `cottendns` systemd service |
 | 🧱 Egress filter | Rejects outbound TCP/53 to avoid incorrect TCP DNS behavior |
 
 Installer options:
@@ -246,21 +249,21 @@ Installer options:
 Examples:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
 sudo bash server_linux_install.sh --local
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --uninstall
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
 ```
 
 Useful service commands:
 
 ```bash
-systemctl status cottenpickdns
-journalctl -u cottenpickdns -f
-systemctl restart cottenpickdns
-systemctl stop cottenpickdns
+systemctl status cottendns
+journalctl -u cottendns -f
+systemctl restart cottendns
+systemctl stop cottendns
 ```
 
-The deployed `server_config.toml` ships with these optional knobs (all safe defaults; edit and `systemctl restart cottenpickdns` to apply):
+The deployed `server_config.toml` ships with these optional knobs (all safe defaults; edit and `systemctl restart cottendns` to apply):
 
 | Key | Default | Purpose |
 | --- | --- | --- |
@@ -302,7 +305,7 @@ Every TOML key can be overridden using a lower-case dashed flag generated from t
 Download the client archive for your platform from:
 
 ```text
-https://github.com/TaJirax/cottenpickDNS/releases/latest
+https://github.com/TaJirax/CottenDns/releases/latest
 ```
 
 Client release archives include:
@@ -365,9 +368,9 @@ sudo bash client_linux_install.sh
 Service commands:
 
 ```bash
-systemctl status cottenpickdns-client
-journalctl -u cottenpickdns-client -f
-systemctl restart cottenpickdns-client
+systemctl status cottendns-client
+journalctl -u cottendns-client -f
+systemctl restart cottendns-client
 ```
 
 The client service runs non-interactively. If the config still has `STARTUP_MODE = "ask"`, the installer changes it to `logs`.
@@ -775,8 +778,8 @@ The client requires `ENCRYPTION_KEY`. Copy the exact value from the server's `en
 Restart the relevant process/service after editing TOML files:
 
 ```bash
-systemctl restart cottenpickdns
-systemctl restart cottenpickdns-client
+systemctl restart cottendns
+systemctl restart cottendns-client
 ```
 
 ## 🛡️ Security And Responsibility
@@ -809,8 +812,8 @@ Project links:
 
 | Resource | Link |
 | --- | --- |
-| Issues | <https://github.com/TaJirax/cottenpickDNS/issues> |
-| Pull requests | <https://github.com/TaJirax/cottenpickDNS/pulls> |
+| Issues | <https://github.com/TaJirax/CottenDns/issues> |
+| Pull requests | <https://github.com/TaJirax/CottenDns/pulls> |
 | Telegram | <https://t.me/whitedns> |
 
 ## 📄 License
@@ -827,7 +830,7 @@ Project lineage:
 | Original project | Master DNS / MasterDnsVPN |
 | Original author | Amin Mahmoudi |
 | Upstream fork/source | Null Route / NullRoute1970 |
-| Current fork | CottenDns / CottenpickDNS |
+| Current fork | CottenDns (repo `CottenDns`) |
 | Current maintainer | tajirax |
 | License | MIT License |
 

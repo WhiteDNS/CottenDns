@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="README.MD">English</a> ·
-  <a href="https://github.com/TaJirax/cottenpickDNS/releases/latest">آخرین Release</a> ·
+  <a href="https://github.com/TaJirax/CottenDns/releases/latest">آخرین Release</a> ·
   <a href="https://t.me/whitedns">کانال تلگرام</a>
 </p>
 
@@ -118,7 +118,7 @@ v.example.com   NS  ns.example.com
 ### 2. نصب سرور
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
 ```
 
 بعد از startup، سرور active encryption key را نمایش می‌دهد و آن را در `encrypt_key.txt` می‌نویسد.
@@ -206,7 +206,7 @@ label کوتاه مهم است. domain کوتاه فضای بیشتری برای
 روی سرور لینوکسی اجرا کنید:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
 ```
 
 installer این کارها را انجام می‌دهد:
@@ -219,7 +219,7 @@ installer این کارها را انجام می‌دهد:
 | 🔥 Firewall | باز کردن DNS port `53` در ابزار firewall پشتیبانی‌شده |
 | ⚙️ Tuning | اعمال limitهای UDP، socket buffer، file descriptor و systemd |
 | 🔑 Key | اجرای موقت سرور برای تولید `encrypt_key.txt` |
-| 🧰 Service | نصب و start کردن service با نام `cottenpickdns` |
+| 🧰 Service | نصب و start کردن service با نام `cottendns` |
 | 🧱 Egress filter | reject کردن outbound TCP/53 برای جلوگیری از رفتار TCP DNS اشتباه |
 
 گزینه‌های installer:
@@ -234,18 +234,18 @@ installer این کارها را انجام می‌دهد:
 نمونه‌ها:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
 sudo bash server_linux_install.sh --local
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --uninstall
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
 ```
 
 دستورهای service:
 
 ```bash
-systemctl status cottenpickdns
-journalctl -u cottenpickdns -f
-systemctl restart cottenpickdns
-systemctl stop cottenpickdns
+systemctl status cottendns
+journalctl -u cottendns -f
+systemctl restart cottendns
+systemctl stop cottendns
 ```
 
 ### 🧪 اجرای دستی سرور
@@ -275,7 +275,7 @@ flagهای کاربردی سرور:
 archive کلاینت مناسب platform خود را از این صفحه دریافت کنید:
 
 ```text
-https://github.com/TaJirax/cottenpickDNS/releases/latest
+https://github.com/TaJirax/CottenDns/releases/latest
 ```
 
 archiveهای کلاینت شامل این موارد هستند:
@@ -336,9 +336,9 @@ sudo bash client_linux_install.sh
 دستورهای service:
 
 ```bash
-systemctl status cottenpickdns-client
-journalctl -u cottenpickdns-client -f
-systemctl restart cottenpickdns-client
+systemctl status cottendns-client
+journalctl -u cottendns-client -f
+systemctl restart cottendns-client
 ```
 
 service کلاینت non-interactive اجرا می‌شود. اگر config هنوز `STARTUP_MODE = "ask"` داشته باشد، installer آن را به `logs` تغییر می‌دهد.
@@ -718,8 +718,8 @@ upload و download MTU را پایین بیاورید، duplication مربوط �
 بعد از ویرایش فایل‌های TOML، process/service مربوطه را restart کنید:
 
 ```bash
-systemctl restart cottenpickdns
-systemctl restart cottenpickdns-client
+systemctl restart cottendns
+systemctl restart cottendns-client
 ```
 
 ## 🛡️ امنیت و مسئولیت
@@ -752,8 +752,8 @@ go vet ./...
 
 | منبع | لینک |
 | --- | --- |
-| Issues | <https://github.com/TaJirax/cottenpickDNS/issues> |
-| Pull requests | <https://github.com/TaJirax/cottenpickDNS/pulls> |
+| Issues | <https://github.com/TaJirax/CottenDns/issues> |
+| Pull requests | <https://github.com/TaJirax/CottenDns/pulls> |
 | Telegram | <https://t.me/whitedns> |
 
 ## 📄 مجوز
@@ -769,7 +769,7 @@ lineage پروژه:
 | پروژه اصلی | Master DNS / MasterDnsVPN |
 | نویسنده اصلی | Amin Mahmoudi |
 | fork/source بالادستی | Null Route / NullRoute1970 |
-| fork فعلی | CottenDns / CottenpickDNS |
+| fork فعلی | CottenDns (مخزن `CottenDns`) |
 | نگهدارنده فعلی | tajirax |
 | License | MIT License |
 

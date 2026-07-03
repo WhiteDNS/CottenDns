@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 
@@ -79,7 +79,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("CottenpickDNS Client Version: %s\n", version.GetVersion())
+		fmt.Printf("CottenDns Client Version: %s\n", version.GetVersion())
 		return
 	}
 
@@ -122,7 +122,7 @@ func main() {
 
 	log := app.Log()
 	if log != nil {
-		log.Infof("\U0001F680 <green>CottenpickDNS Client Started</green>")
+		log.Infof("\U0001F680 <green>CottenDns Client Started</green>")
 		log.Infof("\U0001F4C4 <green>Configuration loaded from: <cyan>%s</cyan></green>", resolvedConfigPath)
 		log.Infof("\U0001F5C2  <green>Connection Catalog: <cyan>%d</cyan> domain-resolver pairs</green>", len(app.Connections()))
 	}

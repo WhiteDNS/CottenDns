@@ -1,10 +1,10 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic and initialization for the CottenpickDNS client.
+// Package client provides the core logic and initialization for the CottenDns client.
 // This file (client.go) defines the main Client struct and bootstrapping process.
 // ==============================================================================
 package client
@@ -270,7 +270,7 @@ func Bootstrap(configPath string, overrides config.ClientConfigOverrides) (*Clie
 	}
 	cfg.ApplyStartupModeMTU("resolvers")
 
-	log := logger.New("CottenpickDNS Client", cfg.LogLevel)
+	log := logger.New("CottenDns Client", cfg.LogLevel)
 
 	codec, err := security.NewCodec(cfg.DataEncryptionMethod, cfg.EncryptionKey)
 	if err != nil {
@@ -319,7 +319,7 @@ func BootstrapFromLogs(configPath string, entries []ResolverCacheEntry, override
 	}
 	cfg.ApplyStartupModeMTU("logs")
 
-	log := logger.New("CottenpickDNS Client", cfg.LogLevel)
+	log := logger.New("CottenDns Client", cfg.LogLevel)
 
 	codec, err := security.NewCodec(cfg.DataEncryptionMethod, cfg.EncryptionKey)
 	if err != nil {

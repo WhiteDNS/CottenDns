@@ -56,31 +56,45 @@ echo -e "${CYAN}------------------------------------------------------${NC}"
 require_cmd systemctl
 
 stop_existing_CottenDns_client_service() {
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns-client\.service'; then
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottendns-client\.service'; then
     log_info "Stopping existing CottenDns client service..."
-    systemctl stop cottenpickdns-client 2>/dev/null || true
+    systemctl stop cottendns-client 2>/dev/null || true
 
     for _ in 1 2 3 4 5; do
-      if ! systemctl is-active --quiet cottenpickdns-client; then
+      if ! systemctl is-active --quiet cottendns-client; then
         break
       fi
       sleep 1
     done
 
     local main_pid
-    main_pid="$(systemctl show cottenpickdns-client --property MainPID --value 2>/dev/null || true)"
+    main_pid="$(systemctl show cottendns-client --property MainPID --value 2>/dev/null || true)"
     if [[ -n "${main_pid:-}" && "$main_pid" != "0" ]] && kill -0 "$main_pid" 2>/dev/null; then
-      log_warn "cottenpickdns-client service is still active. Sending SIGTERM to MainPID: $main_pid"
+      log_warn "cottendns-client service is still active. Sending SIGTERM to MainPID: $main_pid"
       kill "$main_pid" 2>/dev/null || true
       sleep 2
       kill -0 "$main_pid" 2>/dev/null && kill -9 "$main_pid" 2>/dev/null || true
     fi
 
-    systemctl reset-failed cottenpickdns-client 2>/dev/null || true
+    systemctl reset-failed cottendns-client 2>/dev/null || true
   fi
 }
 
+# Remove the pre-rename "cottenpickdns-client" unit so an upgrade does not leave
+# a stale service running or re-enabled at boot.
+cleanup_legacy_cottenpickdns_client() {
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns-client\.service'; then
+    log_info "Removing legacy cottenpickdns-client service..."
+    systemctl stop cottenpickdns-client 2>/dev/null || true
+    systemctl disable cottenpickdns-client >/dev/null 2>&1 || true
+    systemctl reset-failed cottenpickdns-client 2>/dev/null || true
+  fi
+  rm -f /etc/systemd/system/cottenpickdns-client.service 2>/dev/null || true
+  systemctl daemon-reload 2>/dev/null || true
+}
+
 log_header "Stopping Existing CottenDns Client"
+cleanup_legacy_cottenpickdns_client
 stop_existing_CottenDns_client_service
 
 log_header "Locating Client Binary"
@@ -130,7 +144,7 @@ if grep -q '^STARTUP_MODE[[:space:]]*=[[:space:]]*"ask"' client_config.toml; the
 fi
 
 log_header "Installing System Service"
-SVC="/etc/systemd/system/cottenpickdns-client.service"
+SVC="/etc/systemd/system/cottendns-client.service"
 cat > "$SVC" <<EOF
 [Unit]
 Description=CottenDns Client
@@ -157,12 +171,12 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable cottenpickdns-client >/dev/null 2>&1 || log_warn "Could not enable cottenpickdns-client service at boot."
-systemctl restart cottenpickdns-client
+systemctl enable cottendns-client >/dev/null 2>&1 || log_warn "Could not enable cottendns-client service at boot."
+systemctl restart cottendns-client
 
 sleep 2
-if ! systemctl is-active --quiet cottenpickdns-client; then
-  journalctl -u cottenpickdns-client -n 50 --no-pager || true
+if ! systemctl is-active --quiet cottendns-client; then
+  journalctl -u cottendns-client -n 50 --no-pager || true
   log_error "Service failed to start. See logs above."
 fi
 
@@ -172,12 +186,12 @@ echo -e "\n${CYAN}======================================================${NC}"
 echo -e " ${GREEN}${BOLD}       INSTALLATION COMPLETED SUCCESSFULLY!${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo -e "${BOLD}Commands:${NC}"
-echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottenpickdns-client"
-echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottenpickdns-client"
-echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottenpickdns-client"
-echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottenpickdns-client -f"
+echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottendns-client"
+echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottendns-client"
+echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottendns-client"
+echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottendns-client -f"
 echo -e "\n${BOLD}Files:${NC}"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/client_config.toml"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/client_resolvers.txt"
 echo -e "${YELLOW}Note:${NC} Edit client_config.toml (set DOMAINS, ENCRYPTION_KEY, etc.) then run:"
-echo -e "  ${YELLOW}>${NC} systemctl restart cottenpickdns-client"
+echo -e "  ${YELLOW}>${NC} systemctl restart cottendns-client"

@@ -3,7 +3,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 // tunnel_e2e_test.go — end-to-end smoke test for the full DNS tunnel: it builds
@@ -132,7 +132,7 @@ func waitForPattern(buf *safeBuf, pattern string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for pattern %q", pattern)
 }
 
-// startEchoServer starts a TCP echo server that the CottenpickDNS server (in TCP
+// startEchoServer starts a TCP echo server that the CottenDns server (in TCP
 // mode) forwards tunneled connections to. Returns its port.
 func startEchoServer(t *testing.T) int {
 	t.Helper()

@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the CottenpickDNS client.
+// Package client provides the core logic for the CottenDns client.
 // This file (resolver_cache_log.go) handles per-session resolver cache logging.
 // Each line records a working resolver together with its MTU values so that
 // future runs can start quickly by skipping the full MTU scan.

@@ -61,10 +61,10 @@ select_release_artifact() {
 
   local base_url
   if [[ -n "$version" ]]; then
-    base_url="https://github.com/TaJirax/cottenpickDNS/releases/download/${version}"
+    base_url="https://github.com/TaJirax/CottenDns/releases/download/${version}"
     log_info "Targeting CottenDns release: ${version}"
   else
-    base_url="https://github.com/TaJirax/cottenpickDNS/releases/latest/download"
+    base_url="https://github.com/TaJirax/CottenDns/releases/latest/download"
   fi
 
   case "$arch" in
@@ -145,7 +145,7 @@ print_usage() {
 CottenDns Server Linux Installer
 
 Usage:
-  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) [OPTIONS]
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) [OPTIONS]
 
 Options:
   -v, --version <VERSION>   Install a specific CottenDns release (tag), e.g. v1.2.3.
@@ -160,17 +160,17 @@ Options:
 
 Examples:
   # Install the latest release (default behavior):
-  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh)
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
 
   # Install a specific release version:
-  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --version v1.2.3
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version v1.2.3
 
   # Local/offline install for testing:
   python build.py
   sudo bash server_linux_install.sh --local
 
   # Uninstall CottenDns:
-  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/cottenpickDNS/main/server_linux_install.sh) --uninstall
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
 USAGE
 }
 
@@ -256,35 +256,57 @@ else
 fi
 echo -e "${CYAN}------------------------------------------------------${NC}"
 
+# Remove units/files from the pre-rename "cottenpickdns" naming so an upgrade
+# does not leave a stale service holding port 53 or restarting in the background.
+cleanup_legacy_cottenpickdns() {
+  for unit in cottenpickdns cottenpickdns-egress-filter; do
+    if systemctl list-unit-files --all 2>/dev/null | grep -q "^${unit}\.service"; then
+      log_info "Removing legacy ${unit} service..."
+      systemctl stop "${unit}" 2>/dev/null || true
+      systemctl disable "${unit}" >/dev/null 2>&1 || true
+      systemctl reset-failed "${unit}" 2>/dev/null || true
+    fi
+  done
+  rm -f /etc/systemd/system/cottenpickdns.service 2>/dev/null || true
+  rm -f /etc/systemd/system/cottenpickdns-egress-filter.service 2>/dev/null || true
+  rm -rf /etc/systemd/system/cottenpickdns.service.d 2>/dev/null || true
+  rm -f /usr/local/sbin/cottenpickdns-egress-filter.sh 2>/dev/null || true
+  rm -f /etc/sysctl.d/99-cottenpickdns.conf /etc/sysctl.d/99-cottenpickdns-tuning.conf 2>/dev/null || true
+  rm -f /etc/security/limits.d/99-cottenpickdns.conf 2>/dev/null || true
+  systemctl daemon-reload 2>/dev/null || true
+}
+
 do_uninstall() {
   log_header "Uninstalling CottenDns"
 
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns\.service'; then
-    log_info "Stopping and disabling cottenpickdns service..."
-    systemctl stop cottenpickdns 2>/dev/null || true
-    systemctl disable cottenpickdns >/dev/null 2>&1 || true
-    systemctl reset-failed cottenpickdns 2>/dev/null || true
+  cleanup_legacy_cottenpickdns
+
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottendns\.service'; then
+    log_info "Stopping and disabling cottendns service..."
+    systemctl stop cottendns 2>/dev/null || true
+    systemctl disable cottendns >/dev/null 2>&1 || true
+    systemctl reset-failed cottendns 2>/dev/null || true
   else
-    log_info "No cottenpickdns systemd unit found."
+    log_info "No cottendns systemd unit found."
   fi
 
-  if [[ -f /etc/systemd/system/cottenpickdns.service ]]; then
-    rm -f /etc/systemd/system/cottenpickdns.service
-    log_success "Removed /etc/systemd/system/cottenpickdns.service"
+  if [[ -f /etc/systemd/system/cottendns.service ]]; then
+    rm -f /etc/systemd/system/cottendns.service
+    log_success "Removed /etc/systemd/system/cottendns.service"
   fi
-  if [[ -f /etc/systemd/system/cottenpickdns-egress-filter.service ]]; then
-    systemctl stop cottenpickdns-egress-filter.service 2>/dev/null || true
-    systemctl disable cottenpickdns-egress-filter.service >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/cottenpickdns-egress-filter.service
-    log_success "Removed /etc/systemd/system/cottenpickdns-egress-filter.service"
+  if [[ -f /etc/systemd/system/cottendns-egress-filter.service ]]; then
+    systemctl stop cottendns-egress-filter.service 2>/dev/null || true
+    systemctl disable cottendns-egress-filter.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/cottendns-egress-filter.service
+    log_success "Removed /etc/systemd/system/cottendns-egress-filter.service"
   fi
-  if [[ -d /etc/systemd/system/cottenpickdns.service.d ]]; then
-    rm -rf /etc/systemd/system/cottenpickdns.service.d
-    log_success "Removed /etc/systemd/system/cottenpickdns.service.d/"
+  if [[ -d /etc/systemd/system/cottendns.service.d ]]; then
+    rm -rf /etc/systemd/system/cottendns.service.d
+    log_success "Removed /etc/systemd/system/cottendns.service.d/"
   fi
-  if [[ -f /usr/local/sbin/cottenpickdns-egress-filter.sh ]]; then
-    rm -f /usr/local/sbin/cottenpickdns-egress-filter.sh
-    log_success "Removed /usr/local/sbin/cottenpickdns-egress-filter.sh"
+  if [[ -f /usr/local/sbin/cottendns-egress-filter.sh ]]; then
+    rm -f /usr/local/sbin/cottendns-egress-filter.sh
+    log_success "Removed /usr/local/sbin/cottendns-egress-filter.sh"
   fi
   systemctl daemon-reload 2>/dev/null || true
 
@@ -292,7 +314,7 @@ do_uninstall() {
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
     cmdline="$(ps -p "$pid" -o cmd= 2>/dev/null || true)"
-    if echo "$cmdline" | grep -qiE 'cottenpickdns'; then
+    if echo "$cmdline" | grep -qiE 'cottendns'; then
       log_warn "Terminating stray CottenDns process (PID: $pid)..."
       kill "$pid" 2>/dev/null || true
       sleep 1
@@ -300,21 +322,21 @@ do_uninstall() {
         kill -9 "$pid" 2>/dev/null || true
       fi
     fi
-  done < <(pgrep -fi 'cottenpickdns' 2>/dev/null || true)
+  done < <(pgrep -fi 'cottendns' 2>/dev/null || true)
 
-  if [[ -f /etc/sysctl.d/99-cottenpickdns.conf ]]; then
-    rm -f /etc/sysctl.d/99-cottenpickdns.conf
+  if [[ -f /etc/sysctl.d/99-cottendns.conf ]]; then
+    rm -f /etc/sysctl.d/99-cottendns.conf
     sysctl --system >/dev/null 2>&1 || true
-    log_success "Removed kernel tuning (/etc/sysctl.d/99-cottenpickdns.conf)."
+    log_success "Removed kernel tuning (/etc/sysctl.d/99-cottendns.conf)."
   fi
-  if [[ -f /etc/sysctl.d/99-cottenpickdns-tuning.conf ]]; then
-    rm -f /etc/sysctl.d/99-cottenpickdns-tuning.conf
+  if [[ -f /etc/sysctl.d/99-cottendns-tuning.conf ]]; then
+    rm -f /etc/sysctl.d/99-cottendns-tuning.conf
     sysctl --system >/dev/null 2>&1 || true
-    log_success "Removed supplementary kernel tuning (/etc/sysctl.d/99-cottenpickdns-tuning.conf)."
+    log_success "Removed supplementary kernel tuning (/etc/sysctl.d/99-cottendns-tuning.conf)."
   fi
-  if [[ -f /etc/security/limits.d/99-cottenpickdns.conf ]]; then
-    rm -f /etc/security/limits.d/99-cottenpickdns.conf
-    log_success "Removed file descriptor limits (/etc/security/limits.d/99-cottenpickdns.conf)."
+  if [[ -f /etc/security/limits.d/99-cottendns.conf ]]; then
+    rm -f /etc/security/limits.d/99-cottendns.conf
+    log_success "Removed file descriptor limits (/etc/security/limits.d/99-cottendns.conf)."
   fi
 
   if [[ -f /etc/systemd/resolved.conf.bak && -f /etc/systemd/resolved.conf ]]; then
@@ -349,7 +371,7 @@ do_uninstall() {
   fi
 
   echo -e "\n${CYAN}======================================================${NC}"
-  echo -e " ${GREEN}${BOLD}        STORMDNS UNINSTALL COMPLETED${NC}"
+  echo -e " ${GREEN}${BOLD}        COTTENDNS UNINSTALL COMPLETED${NC}"
   echo -e "${CYAN}======================================================${NC}"
   echo -e "${YELLOW}Note:${NC} Firewall rules for port 53 (UDP/TCP) were left in place."
   echo -e "      Remove them manually if no longer needed."
@@ -544,34 +566,34 @@ remove_port53_forward_rules() {
 
 stop_existing_CottenDns_service() {
   local unit_present=0
-  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottenpickdns\.service'; then
+  if systemctl list-unit-files --all 2>/dev/null | grep -q '^cottendns\.service'; then
     unit_present=1
     log_info "Stopping existing CottenDns service..."
-    systemctl stop cottenpickdns 2>/dev/null || true
+    systemctl stop cottendns 2>/dev/null || true
 
     for _ in 1 2 3 4 5; do
-      if ! systemctl is-active --quiet cottenpickdns; then
+      if ! systemctl is-active --quiet cottendns; then
         break
       fi
       sleep 1
     done
 
     local main_pid
-    main_pid="$(systemctl show cottenpickdns --property MainPID --value 2>/dev/null || true)"
+    main_pid="$(systemctl show cottendns --property MainPID --value 2>/dev/null || true)"
     if [[ -n "${main_pid:-}" && "$main_pid" != "0" ]] && kill -0 "$main_pid" 2>/dev/null; then
-      log_warn "cottenpickdns service is still active. Trying to terminate MainPID: $main_pid"
+      log_warn "cottendns service is still active. Trying to terminate MainPID: $main_pid"
       terminate_port53_pid "$main_pid" || true
     fi
 
-    systemctl stop cottenpickdns 2>/dev/null || true
-    systemctl reset-failed cottenpickdns 2>/dev/null || true
+    systemctl stop cottendns 2>/dev/null || true
+    systemctl reset-failed cottendns 2>/dev/null || true
   fi
 
   local pid cmdline killed=0
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
     cmdline="$(ps -p "$pid" -o cmd= 2>/dev/null || true)"
-    if echo "$cmdline" | grep -qiE 'cottenpickdns|CottenDns[_-]?[Ss]erver|CottenDNS[_-]?[Ss]erver'; then
+    if echo "$cmdline" | grep -qiE 'cottendns|CottenDns[_-]?[Ss]erver|CottenDNS[_-]?[Ss]erver'; then
       if [[ $killed -eq 0 && $unit_present -eq 0 ]]; then
         log_info "Stopping existing CottenDns process that was started outside systemd..."
       fi
@@ -582,6 +604,7 @@ stop_existing_CottenDns_service() {
 }
 
 log_header "Stopping Existing CottenDns"
+cleanup_legacy_cottenpickdns
 stop_existing_CottenDns_service
 
 log_header "Managing Network Ports (Port 53)"
@@ -685,7 +708,7 @@ fi
 log_info "Detected firewall handling: ${ACTIVE_FIREWALL}"
 
 log_header "Tuning Kernel & Limits"
-cat > /etc/sysctl.d/99-cottenpickdns.conf <<'EOF'
+cat > /etc/sysctl.d/99-cottendns.conf <<'EOF'
 # CottenDns high-load tuning
 fs.file-max = 2097152
 fs.nr_open = 2097152
@@ -706,7 +729,7 @@ net.ipv4.ip_local_port_range = 10240 65535
 EOF
 sysctl --system >/dev/null 2>&1 || log_warn "Could not fully apply sysctl settings."
 
-cat > /etc/sysctl.d/99-cottenpickdns-tuning.conf <<'EOF'
+cat > /etc/sysctl.d/99-cottendns-tuning.conf <<'EOF'
 # CottenDns performance tuning (supplementary)
 fs.file-max = 2097152
 fs.nr_open = 2097152
@@ -720,7 +743,7 @@ net.ipv4.ip_local_port_range = 10240 65535
 EOF
 sysctl --system >/dev/null 2>&1 || log_warn "Some supplementary sysctl values may not have applied."
 
-cat > /etc/security/limits.d/99-cottenpickdns.conf <<'EOF'
+cat > /etc/security/limits.d/99-cottendns.conf <<'EOF'
 * soft nofile 1048576
 * hard nofile 1048576
 root soft nofile 1048576
@@ -858,7 +881,7 @@ echo -e "  YOUR ENCRYPTION KEY: ${NC}${CYAN}$(cat encrypt_key.txt 2>/dev/null)${
 echo -e "${GREEN}${BOLD}------------------------------------------------------${NC}"
 
 log_header "Installing Egress Filter (Block Outbound TCP/53)"
-cat > /usr/local/sbin/cottenpickdns-egress-filter.sh <<'FILTER'
+cat > /usr/local/sbin/cottendns-egress-filter.sh <<'FILTER'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -872,17 +895,17 @@ if command -v ip6tables >/dev/null 2>&1; then
   ip6tables -I OUTPUT 1 -p tcp --dport 53 -j REJECT --reject-with tcp-reset || true
 fi
 FILTER
-chmod +x /usr/local/sbin/cottenpickdns-egress-filter.sh
+chmod +x /usr/local/sbin/cottendns-egress-filter.sh
 
-cat > /etc/systemd/system/cottenpickdns-egress-filter.service <<'SERVICE'
+cat > /etc/systemd/system/cottendns-egress-filter.service <<'SERVICE'
 [Unit]
 Description=CottenDns egress filter - reject outbound TCP/53
 After=network.target
-Before=cottenpickdns.service
+Before=cottendns.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/cottenpickdns-egress-filter.sh
+ExecStart=/usr/local/sbin/cottendns-egress-filter.sh
 RemainAfterExit=yes
 
 [Install]
@@ -892,7 +915,7 @@ SERVICE
 log_success "Egress filter installed."
 
 log_header "Installing System Service"
-SVC="/etc/systemd/system/cottenpickdns.service"
+SVC="/etc/systemd/system/cottendns.service"
 cat > "$SVC" <<EOF
 [Unit]
 Description=CottenDns Server
@@ -920,16 +943,16 @@ EOF
 
 systemctl daemon-reload
 
-mkdir -p /etc/systemd/system/cottenpickdns.service.d
+mkdir -p /etc/systemd/system/cottendns.service.d
 
-cat > /etc/systemd/system/cottenpickdns.service.d/10-cottenpickdns-tuning.conf <<'DROPIN'
+cat > /etc/systemd/system/cottendns.service.d/10-cottendns-tuning.conf <<'DROPIN'
 [Unit]
-Wants=cottenpickdns-egress-filter.service
-After=cottenpickdns-egress-filter.service
+Wants=cottendns-egress-filter.service
+After=cottendns-egress-filter.service
 DROPIN
 
 systemctl daemon-reload
-systemctl enable --now cottenpickdns-egress-filter.service
+systemctl enable --now cottendns-egress-filter.service
 
 log_success "Egress filter enabled."
 
@@ -939,11 +962,11 @@ ss -K state close-wait dport = :53 >/dev/null 2>&1 || true
 ss -6 -K state syn-sent dport = :53 >/dev/null 2>&1 || true
 ss -6 -K state close-wait dport = :53 >/dev/null 2>&1 || true
 
-systemctl enable cottenpickdns >/dev/null 2>&1
-systemctl restart cottenpickdns
+systemctl enable cottendns >/dev/null 2>&1
+systemctl restart cottendns
 
-if ! systemctl is-active --quiet cottenpickdns; then
-  journalctl -u cottenpickdns -n 50 --no-pager || true
+if ! systemctl is-active --quiet cottendns; then
+  journalctl -u cottendns -n 50 --no-pager || true
   log_error "Service failed to start. See logs above."
 fi
 
@@ -962,13 +985,13 @@ echo -e "\n${CYAN}======================================================${NC}"
 echo -e " ${GREEN}${BOLD}       INSTALLATION COMPLETED SUCCESSFULLY!${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo -e "${BOLD}Commands:${NC}"
-echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottenpickdns"
-echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottenpickdns"
-echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottenpickdns"
-echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottenpickdns -f"
+echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottendns"
+echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottendns"
+echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottendns"
+echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottendns -f"
 echo -e "\n${BOLD}Files:${NC}"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/server_config.toml"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/encrypt_key.txt"
-echo -e "${YELLOW}Final Note:${NC} If config changes, run: systemctl restart cottenpickdns"
+echo -e "${YELLOW}Final Note:${NC} If config changes, run: systemctl restart cottendns"
 
 rm -f *.spec >/dev/null 2>&1 || true

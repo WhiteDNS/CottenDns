@@ -1,5 +1,5 @@
 # ==============================================================================
-# CottenpickDNS Go Client Configuration (Sample)
+# CottenDns Go Client Configuration (Sample)
 # This sample is written for the current Go client implementation.
 # Every key below is read by code or intentionally kept as an active runtime knob.
 # Profile below is biased toward lossy / high-latency links with many resolvers.
@@ -519,7 +519,7 @@ LOG_DIR = "logs"
 
 # File name template for the session log file.
 # {time} is replaced with the startup timestamp (YYYYMMDD_HHMMSS).
-LOG_FILE_NAME = "cottenpickdns_{time}.log"
+LOG_FILE_NAME = "cottendns_{time}.log"
 
 # Interval in seconds at which upload/download speed and cumulative session
 # totals are printed to the console log window.

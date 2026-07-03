@@ -1,14 +1,19 @@
 Notices and Attribution
 
-StormDNS is an independent fork / derivative of MasterDnsVPN.
+CottenDns is an independent fork / derivative of StormDNS, which is itself an
+independent fork / derivative of MasterDnsVPN.
 
 Original project:
 - MasterDnsVPN
 - Original author: Amin Mahmoudi
 - License: MIT License
 
-StormDNS modifications:
+StormDNS modifications (upstream fork):
 - Maintained by: NullRoute1970
+- License: MIT License
+
+CottenDns modifications (this repository):
+- Maintained by: tajirax
 - License: MIT License
 
 This project preserves the MIT License terms of the original project and adds
@@ -19,8 +24,11 @@ MIT License
 Original work:
 Copyright (c) 2026 Amin Mahmoudi
 
-Modifications and derivative work:
+Upstream modifications and derivative work:
 Copyright (c) 2026 NullRoute1970
+
+Modifications and derivative work:
+Copyright (c) 2026 tajirax
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

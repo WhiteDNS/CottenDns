@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 
@@ -10,7 +10,7 @@ package basecodec
 import "testing"
 
 func TestEncodeLowerBase36UsesOnlyLowerAlphaNumeric(t *testing.T) {
-	encoded := EncodeLowerBase36([]byte("CottenpickDNS-123"))
+	encoded := EncodeLowerBase36([]byte("CottenDns-123"))
 	if encoded == "" {
 		t.Fatal("encoded string must not be empty")
 	}

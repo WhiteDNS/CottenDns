@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 
@@ -13,7 +13,7 @@ import (
 )
 
 func TestRawBase64RoundTrip(t *testing.T) {
-	original := []byte("CottenpickDNS-response-payload-1234+/")
+	original := []byte("CottenDns-response-payload-1234+/")
 	encoded := EncodeRawBase64(original)
 	decoded, err := DecodeRawBase64(encoded)
 	if err != nil {

@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the CottenpickDNS client.
+// Package client provides the core logic for the CottenDns client.
 // This file (traffic_stats.go) implements the periodic traffic speed and total
 // bytes reporter that prints to the console log window.
 // ==============================================================================

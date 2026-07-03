@@ -1,10 +1,10 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// Package client provides the core logic for the CottenpickDNS client.
+// Package client provides the core logic for the CottenDns client.
 // This file (client_utils.go) handles common client utility functions.
 // ==============================================================================
 package client
@@ -521,7 +521,7 @@ func (c *Client) ShortPrintBanner() {
 	}
 
 	c.log.Infof("============================================================")
-	c.log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
+	c.log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/CottenDns</yellow>")
 	c.log.Infof("<cyan>Telegram:</cyan> <yellow>https://t.me/whitedns</yellow>")
 	c.log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	c.log.Infof("============================================================")

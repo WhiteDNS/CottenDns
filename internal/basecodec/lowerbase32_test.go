@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 
@@ -13,7 +13,7 @@ import (
 )
 
 func TestEncodeLowerBase32UsesOnlyLowerBase32Alphabet(t *testing.T) {
-	encoded := EncodeLowerBase32([]byte("CottenpickDNS-123"))
+	encoded := EncodeLowerBase32([]byte("CottenDns-123"))
 	if encoded == "" {
 		t.Fatal("encoded string must not be empty")
 	}

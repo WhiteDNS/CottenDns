@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 
@@ -14,7 +14,7 @@ import (
 
 // DNSRecordTypeFromName maps a case-insensitive record-type name (e.g. "TXT",
 // "cname", "AAAA") to its numeric qType. It returns (code, true) on success and
-// (0, false) for an unknown name. Only the types CottenpickDNS can actually carry a
+// (0, false) for an unknown name. Only the types CottenDns can actually carry a
 // tunnel query/response over are recognized.
 func DNSRecordTypeFromName(name string) (uint16, bool) {
 	switch strings.ToUpper(strings.TrimSpace(name)) {

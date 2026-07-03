@@ -1,7 +1,7 @@
 ﻿// ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/cottenpickDNS
+// Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
 package main
@@ -43,7 +43,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("CottenpickDNS Server Version: %s\n", version.GetVersion())
+		fmt.Printf("CottenDns Server Version: %s\n", version.GetVersion())
 		return
 	}
 
@@ -58,18 +58,18 @@ func main() {
 
 	var log *logger.Logger
 	if *logPath != "" {
-		log = logger.NewWithFile("CottenpickDNS Server", cfg.LogLevel, *logPath)
+		log = logger.NewWithFile("CottenDns Server", cfg.LogLevel, *logPath)
 	} else {
-		log = logger.New("CottenpickDNS Server", cfg.LogLevel)
+		log = logger.New("CottenDns Server", cfg.LogLevel)
 	}
 
 	log.Infof("============================================================")
-	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/cottenpickDNS</yellow>")
+	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/CottenDns</yellow>")
 	log.Infof("<cyan>Telegram:</cyan> <yellow>https://t.me/whitedns</yellow>")
 	log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	log.Infof("============================================================")
 
-	log.Infof("\U0001F680 <magenta>CottenpickDNS Server starting ...</magenta>")
+	log.Infof("\U0001F680 <magenta>CottenDns Server starting ...</magenta>")
 
 	keyInfo, err := security.EnsureServerEncryptionKey(cfg)
 	if err != nil {
