@@ -51,6 +51,11 @@ type ServerConfig struct {
 	SOCKS5FragmentStoreCapacity       int      `toml:"SOCKS5_FRAGMENT_STORE_CAPACITY"`
 	MaxPacketSize                     int      `toml:"MAX_PACKET_SIZE"`
 	MaxStreamsPerSession              int      `toml:"MAX_STREAMS_PER_SESSION"`
+	// MaxActiveSessions caps concurrent live tunnel sessions, protecting server
+	// memory/CPU from being exhausted by session-init floods. The session-ID space
+	// is 16-bit (65535 slots) but that many live sessions is far more load than a
+	// single node should carry, so this defaults to 2048 (the TCP_MAX_CONNS ceiling).
+	MaxActiveSessions                 int      `toml:"MAX_ACTIVE_SESSIONS"`
 	MaxDNSResponseBytes               int      `toml:"MAX_DNS_RESPONSE_BYTES"`
 	DropLogIntervalSecs               float64  `toml:"DROP_LOG_INTERVAL_SECONDS"`
 	InvalidCookieWindowSecs           float64  `toml:"INVALID_COOKIE_WINDOW_SECONDS"`
@@ -103,6 +108,20 @@ type ServerConfig struct {
 	FECAutoEnabled                 bool    `toml:"FEC_AUTO_ENABLED"`
 	FECAutoLossThreshold           float64 `toml:"FEC_AUTO_LOSS_THRESHOLD"`
 	FECAutoMaxParity               int     `toml:"FEC_AUTO_MAX_PARITY"`
+	// Super-FEC: a last-ditch, maximum-parity band for extreme download loss. When
+	// FECSuperEnabled and the measured loss enters [FECSuperLossFloor,
+	// FECSuperLossCeil], parity is driven to FECAutoMaxParity for a best-effort
+	// rebuild. Above FECSuperLossCeil the server stops escalating (relaxes to the
+	// base rate) so it does not burn CPU protecting hopeless blocks — those are
+	// left to ARQ. Defaults: floor 0.75, ceil 0.85.
+	FECSuperEnabled   bool    `toml:"FEC_SUPER_ENABLED"`
+	FECSuperLossFloor float64 `toml:"FEC_SUPER_LOSS_FLOOR"`
+	FECSuperLossCeil  float64 `toml:"FEC_SUPER_LOSS_CEIL"`
+	// FECSuperMaxParity caps per-block parity while inside the Super-FEC band. 0
+	// auto-sizes to the Reed-Solomon hard limit for the block. Bounding it lets an
+	// operator trade rebuild strength against the bandwidth amplification that very
+	// high parity implies.
+	FECSuperMaxParity int `toml:"FEC_SUPER_MAX_PARITY"`
 	LogLevel                       string  `toml:"LOG_LEVEL"`
 	ARQWindowSize                  int     `toml:"ARQ_WINDOW_SIZE"`
 	ARQInitialRTOSeconds           float64 `toml:"ARQ_INITIAL_RTO_SECONDS"`
@@ -159,6 +178,7 @@ func defaultServerConfig() ServerConfig {
 		SOCKS5FragmentStoreCapacity:       512,
 		MaxPacketSize:                     65535,
 		MaxStreamsPerSession:              4096,
+		MaxActiveSessions:                 2048,
 		MaxDNSResponseBytes:               32768,
 		DropLogIntervalSecs:               2.0,
 		InvalidCookieWindowSecs:           2.0,
@@ -185,7 +205,7 @@ func defaultServerConfig() ServerConfig {
 		UseExternalSOCKS5:                 false,
 		SOCKS5Auth:                        false,
 		SOCKS5User:                        "admin",
-		SOCKS5Pass:                        "123456",
+		SOCKS5Pass:                        "C0tt0n-C@ndy-Cl0ud!",
 		ForwardIP:                         "",
 		ForwardPort:                       1080,
 		Domain:                            nil,
@@ -196,6 +216,10 @@ func defaultServerConfig() ServerConfig {
 		EncryptionAutoDetect:              true,
 		FECAutoEnabled:                    true,
 		FECAutoLossThreshold:              0.3,
+		FECSuperEnabled:                   true,
+		FECSuperLossFloor:                 0.75,
+		FECSuperLossCeil:                  0.85,
+		FECSuperMaxParity:                 0,
 		EncryptionKeyFile:                 "encrypt_key.txt",
 		LogLevel:                          "INFO",
 		ARQWindowSize:                     2000,
@@ -340,6 +364,7 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 		cfg.MaxPacketSize = 65535
 	}
 	cfg.MaxStreamsPerSession = clampInt(defaultIntBelow(cfg.MaxStreamsPerSession, 1, 4096), 16, 65535)
+	cfg.MaxActiveSessions = clampInt(defaultIntBelow(cfg.MaxActiveSessions, 1, 2048), 1, 65535)
 	cfg.MaxDNSResponseBytes = clampInt(defaultIntBelow(cfg.MaxDNSResponseBytes, 1, 32768), 512, 65535)
 
 	if cfg.DropLogIntervalSecs <= 0 {
@@ -464,6 +489,29 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 	}
 	if cfg.FECAutoMaxParity < cfg.FECParity {
 		cfg.FECAutoMaxParity = cfg.FECParity
+	}
+
+	// Super-FEC band. Keep the floor within (threshold, 1) and the ceiling within
+	// [floor, 1) so the "engage" band and the "give up" region are well-ordered.
+	if cfg.FECSuperLossFloor <= 0 || cfg.FECSuperLossFloor >= 1 {
+		cfg.FECSuperLossFloor = 0.75
+	}
+	if cfg.FECSuperLossFloor <= cfg.FECAutoLossThreshold {
+		cfg.FECSuperLossFloor = cfg.FECAutoLossThreshold + 0.05
+	}
+	if cfg.FECSuperLossCeil <= 0 || cfg.FECSuperLossCeil >= 1 {
+		cfg.FECSuperLossCeil = 0.85
+	}
+	if cfg.FECSuperLossCeil < cfg.FECSuperLossFloor {
+		cfg.FECSuperLossCeil = cfg.FECSuperLossFloor
+	}
+	if cfg.FECSuperMaxParity < 0 {
+		cfg.FECSuperMaxParity = 0
+	}
+	if cfg.FECSuperMaxParity > 0 && cfg.FECSuperMaxParity < cfg.FECAutoMaxParity {
+		// The super cap should never be tighter than the normal auto ceiling, or
+		// the band would protect *less* than ordinary auto-FEC.
+		cfg.FECSuperMaxParity = cfg.FECAutoMaxParity
 	}
 
 	cfg.SupportedUploadCompressionTypes = normalizeCompressionTypeList(cfg.SupportedUploadCompressionTypes)

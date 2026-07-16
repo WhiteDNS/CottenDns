@@ -32,6 +32,32 @@ func TestBalancerLeastLossFallsBackToRoundRobinWithoutStats(t *testing.T) {
 	}
 }
 
+func TestMTUGoodputWeightDiscountsLossyResolvers(t *testing.T) {
+	// Unknown MTU -> floor weight, still reachable.
+	if w := mtuGoodputWeight(&Connection{DownloadMTUBytes: 0}); w != 1 {
+		t.Fatalf("unknown MTU should get unit weight, got %d", w)
+	}
+	// Lossless resolver keeps its full MTU as weight.
+	if w := mtuGoodputWeight(&Connection{DownloadMTUBytes: 1000, DownloadMTULoss: 0}); w != 1000 {
+		t.Fatalf("lossless resolver should weight to full MTU, got %d", w)
+	}
+	// A high-MTU-but-lossy resolver is weighted down to its real goodput, so a
+	// smaller-but-clean resolver can out-weigh it. 1000 MTU at 80% loss -> ~200
+	// goodput, below a 500 MTU lossless resolver.
+	lossy := mtuGoodputWeight(&Connection{DownloadMTUBytes: 1000, DownloadMTULoss: 0.8})
+	clean := mtuGoodputWeight(&Connection{DownloadMTUBytes: 500, DownloadMTULoss: 0})
+	if lossy != 200 {
+		t.Fatalf("expected 1000*0.2=200 goodput weight, got %d", lossy)
+	}
+	if lossy >= clean {
+		t.Fatalf("lossy high-MTU resolver (%d) should weigh less than clean lower-MTU one (%d)", lossy, clean)
+	}
+	// Fully-lossy resolver still keeps a floor weight of 1.
+	if w := mtuGoodputWeight(&Connection{DownloadMTUBytes: 1000, DownloadMTULoss: 1}); w != 1 {
+		t.Fatalf("fully-lossy resolver should keep floor weight 1, got %d", w)
+	}
+}
+
 func TestBalancerLowestLatencyUsesRuntimeStats(t *testing.T) {
 	b := NewBalancer(BalancingLowestLatency)
 	connections := []*Connection{

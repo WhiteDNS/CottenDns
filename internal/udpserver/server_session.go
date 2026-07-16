@@ -259,6 +259,7 @@ func (s *Server) maybeEnableStreamFEC(stream *Stream_server) {
 	}
 	if s.cfg.FECAutoEnabled {
 		stream.ConfigureAutoFEC(s.cfg.FECBlockSize, s.cfg.FECParity, s.cfg.FECAutoMaxParity, s.cfg.FECAutoLossThreshold)
+		stream.ConfigureSuperFEC(s.cfg.FECSuperEnabled, s.cfg.FECSuperLossFloor, s.cfg.FECSuperLossCeil, s.cfg.FECSuperMaxParity)
 	}
 }
 

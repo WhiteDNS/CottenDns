@@ -9,6 +9,7 @@ package security
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -55,6 +56,18 @@ func EnsureServerEncryptionKey(cfg config.ServerConfig) (EncryptionKeyInfo, erro
 	info.Key = key
 	info.Generated = true
 	return info, nil
+}
+
+// KeyFingerprint returns a short, non-reversible identifier for an encryption
+// key so operators can confirm which key is loaded across client and server
+// without the key itself ever appearing in logs. It is the first 8 hex chars of
+// the SHA-256 of the key. An empty key yields an empty fingerprint.
+func KeyFingerprint(key string) string {
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 func EncryptionMethodName(methodID int) string {

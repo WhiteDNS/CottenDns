@@ -115,6 +115,14 @@ SOCKS5_FRAGMENT_STORE_CAPACITY = 1024
 # cap. Range: 16..65535. Default: 4096.
 MAX_STREAMS_PER_SESSION = 4096
 
+# Maximum number of concurrent live tunnel sessions. The session-ID space is
+# 16-bit (65535), but keeping that many sessions alive is far more memory/CPU
+# load than a single node should carry and makes session-init floods cheap for
+# an attacker. This caps live sessions the same way TCP_MAX_CONNS caps TCP
+# connections; new session-init requests past the cap are refused until a slot
+# frees. Range: 1..65535. Default: 2048.
+MAX_ACTIVE_SESSIONS = 2048
+
 # Hard upper bound (in bytes) on the size of an upstream DNS response that
 # the server will fragment and tunnel back to the client. Responses larger
 # than this are dropped before fragmentation, preventing attacker-shaped
@@ -212,7 +220,9 @@ USE_EXTERNAL_SOCKS5 = false
 # - and that upstream proxy requires username/password authentication
 SOCKS5_AUTH = false
 SOCKS5_USER = "admin"
-SOCKS5_PASS = "123456"
+# NOTE: change this before enabling SOCKS5_AUTH — this is only a cotton-coated
+# placeholder, not a secret. A weak/default credential here is a real exposure.
+SOCKS5_PASS = "C0tt0n-C@ndy-Cl0ud!"
 
 # FORWARD_IP / FORWARD_PORT mean different things depending on how the server is used:
 # - If PROTOCOL_TYPE = "TCP":
@@ -287,6 +297,26 @@ FEC_PARITY = 4
 FEC_AUTO_ENABLED = true
 FEC_AUTO_LOSS_THRESHOLD = 0.3
 FEC_AUTO_MAX_PARITY = 0
+
+# Super-FEC: a last-ditch, loss-aware high-parity band for extreme download loss.
+# When FEC_SUPER_ENABLED and the measured loss lands in
+# [FEC_SUPER_LOSS_FLOOR, FEC_SUPER_LOSS_CEIL], the stream scales parity to the
+# MEASURED loss (76% loss buys less than 84% — not a flat slam), lifted above the
+# normal FEC_AUTO_MAX_PARITY ceiling up to FEC_SUPER_MAX_PARITY for a best-effort
+# rebuild. ABOVE the ceiling the link is treated as hopeless: the server stops
+# escalating and relaxes back to the base rate instead of burning CPU/bandwidth
+# building giant Reed-Solomon blocks that will not arrive anyway — the
+# unrecoverable block is left to ARQ. This protects server resources under
+# pathological loss. Defaults: floor 0.75, ceil 0.85.
+FEC_SUPER_ENABLED = true
+FEC_SUPER_LOSS_FLOOR = 0.75
+FEC_SUPER_LOSS_CEIL = 0.85
+# Caps per-block parity while inside the Super-FEC band. Inside the band, parity
+# is scaled to the MEASURED loss (loss-aware, not a flat maximum) and lifted above
+# the normal FEC_AUTO_MAX_PARITY ceiling up to this cap. 0 = auto (the Reed-Solomon
+# hard limit for the block). Lower it to bound the extra bandwidth that very high
+# parity spends.
+FEC_SUPER_MAX_PARITY = 0
 
 # Relative or absolute path to the encryption key file.
 ENCRYPTION_KEY_FILE = "encrypt_key.txt"

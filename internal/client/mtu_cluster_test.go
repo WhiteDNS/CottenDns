@@ -135,6 +135,45 @@ func TestSelectMTUOperatingPoint_KeepsCrowdOverOutlier(t *testing.T) {
 	}
 }
 
+func TestSelectMTUOperatingPointPreferHigh_RunsAtHighestSustainableMTU(t *testing.T) {
+	// 2 fast resolvers (8000) + 50 at 1000. The throughput-optimal point keeps the
+	// crowd at 1000; prefer-high (minPool=2) instead runs at 8000 because two
+	// resolvers sustain it — so the high-MTU resolvers actually use their MTU.
+	conns := make([]Connection, 0, 52)
+	conns = append(conns,
+		Connection{IsValid: true, UploadMTUBytes: 300, DownloadMTUBytes: 8000},
+		Connection{IsValid: true, UploadMTUBytes: 300, DownloadMTUBytes: 8000},
+	)
+	for i := 0; i < 50; i++ {
+		conns = append(conns, Connection{IsValid: true, UploadMTUBytes: 120, DownloadMTUBytes: 1000})
+	}
+
+	// Baseline: throughput-optimal keeps the crowd at 1000.
+	if _, d, _ := selectMTUOperatingPoint(conns); d != 1000 {
+		t.Fatalf("baseline optimal download = %d, want 1000", d)
+	}
+	// Prefer-high with minPool=2 raises to 8000.
+	u, d, pool := selectMTUOperatingPointPreferHigh(conns, 2)
+	if d != 8000 || u != 300 || pool != 2 {
+		t.Fatalf("prefer-high got u=%d d=%d pool=%d, want u=300 d=8000 pool=2", u, d, pool)
+	}
+}
+
+func TestSelectMTUOperatingPointPreferHigh_FallsBackWhenPoolTooSmall(t *testing.T) {
+	// Only one resolver sustains the top MTU; with minPool=2 the session must not
+	// strand on it — it falls back to the throughput-optimal point.
+	conns := []Connection{
+		{IsValid: true, UploadMTUBytes: 300, DownloadMTUBytes: 8000},
+		{IsValid: true, UploadMTUBytes: 120, DownloadMTUBytes: 1000},
+		{IsValid: true, UploadMTUBytes: 120, DownloadMTUBytes: 1000},
+	}
+	u, d, pool := selectMTUOperatingPointPreferHigh(conns, 2)
+	// Optimal point over this set is 1000 across all three.
+	if d != 1000 || u != 120 || pool != 3 {
+		t.Fatalf("prefer-high fallback got u=%d d=%d pool=%d, want u=120 d=1000 pool=3", u, d, pool)
+	}
+}
+
 func TestSelectMTUOperatingPoint_IgnoresInvalidAndZero(t *testing.T) {
 	conns := []Connection{
 		{IsValid: false, UploadMTUBytes: 200, DownloadMTUBytes: 9000},

@@ -135,6 +135,20 @@ func DecodePackets(b *Block) ([][]byte, error) {
 	return packets, nil
 }
 
+// MaxParity returns the largest parity-shard count a block of dataShards can
+// carry within the Reed-Solomon 256-shard limit (at least 1). It is the hard
+// ceiling any loss-driven parity scaling can reach.
+func MaxParity(dataShards int) int {
+	if dataShards < 1 {
+		dataShards = 1
+	}
+	p := maxShards - dataShards
+	if p < 1 {
+		p = 1
+	}
+	return p
+}
+
 // ParityForLoss returns a parity-shard count that lets a block of dataShards
 // survive the given loss fraction with a small safety margin. It is the bridge
 // from the measured loss to a concrete code rate (e.g. 0.75 loss over 4 data

@@ -223,6 +223,30 @@ func TestGracefulCloseStreamQueuesCloseReadOnServer(t *testing.T) {
 	}
 }
 
+func TestSessionStoreHonorsMaxActiveSessionsCap(t *testing.T) {
+	const cap = 3
+	// options: sessionInitTTL, recentlyClosedTTL, recentlyClosedCap,
+	// maxStreamsPerSession, maxActiveSessions.
+	store := newSessionStore(8, 32, time.Minute, time.Minute, 100, 100, cap)
+
+	newPayload := func(n int) []byte {
+		p := make([]byte, sessionInitDataSize)
+		p[0] = 1 // valid ResponseMode
+		p[9] = byte(n)
+		return p
+	}
+
+	for i := 0; i < cap; i++ {
+		if _, _, err := store.findOrCreate(newPayload(i), 0, 0, 8); err != nil {
+			t.Fatalf("session %d within cap should succeed, got %v", i, err)
+		}
+	}
+	// One past the cap must be refused rather than allocated.
+	if _, _, err := store.findOrCreate(newPayload(cap), 0, 0, 8); err != ErrSessionTableFull {
+		t.Fatalf("expected ErrSessionTableFull past cap, got %v", err)
+	}
+}
+
 func TestSessionStoreCleanupReturnsExpiredRecordForFollowupCleanup(t *testing.T) {
 	store := newSessionStore(8, 32)
 	record := newTestSessionRecord(9)

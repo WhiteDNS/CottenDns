@@ -60,6 +60,93 @@ func TestStreamServerAutoFECStaysOffOnLowLoss(t *testing.T) {
 	}
 }
 
+// driveLossWindow feeds one full FEC sampling window at the requested loss
+// fraction so maybeAdjustAutoFEC runs exactly once, then returns the parity the
+// encoder settled on (0 when FEC never turned on).
+func driveLossWindow(s *Stream_server, lossFrac float64) int {
+	resends := int(float64(fecAutoWindow) * lossFrac / (1 - lossFrac))
+	for i := 0; i < resends; i++ {
+		s.recordFECSample(Enums.PACKET_STREAM_RESEND)
+	}
+	for i := 0; i < fecAutoWindow; i++ {
+		s.recordFECSample(Enums.PACKET_STREAM_DATA)
+	}
+	s.fecMu.Lock()
+	defer s.fecMu.Unlock()
+	if s.fecEnc == nil {
+		return 0
+	}
+	return s.fecEnc.Parity()
+}
+
+func TestStreamServerSuperFECIsLossAwareInBand(t *testing.T) {
+	// Two streams, identical config, driven at different in-band loss. The higher
+	// loss must earn strictly more parity — proving the band scales with loss
+	// instead of slamming a flat maximum.
+	lowLoss := &Stream_server{ID: 20}
+	lowLoss.ConfigureAutoFEC(4, 2, 16, 0.3)
+	lowLoss.ConfigureSuperFEC(true, 0.75, 0.85, 0)
+
+	highLoss := &Stream_server{ID: 21}
+	highLoss.ConfigureAutoFEC(4, 2, 16, 0.3)
+	highLoss.ConfigureSuperFEC(true, 0.75, 0.85, 0)
+
+	pLow := driveLossWindow(lowLoss, 0.76)
+	pHigh := driveLossWindow(highLoss, 0.84)
+
+	if pLow <= 2 {
+		t.Fatalf("in-band low-loss parity should be well above base, got %d", pLow)
+	}
+	if pHigh <= pLow {
+		t.Fatalf("higher in-band loss must earn more parity: low(76%%)=%d high(84%%)=%d", pLow, pHigh)
+	}
+	// The band must be allowed to exceed the normal auto ceiling (16) under the
+	// heavier loss — that lift is the whole point of Super-FEC.
+	if pHigh <= 16 {
+		t.Fatalf("Super-FEC should lift parity above the auto ceiling (16), got %d", pHigh)
+	}
+}
+
+func TestStreamServerSuperFECRespectsMaxParityCap(t *testing.T) {
+	s := &Stream_server{ID: 22}
+	s.ConfigureAutoFEC(4, 2, 16, 0.3)
+	// Cap the band at 20 parity.
+	s.ConfigureSuperFEC(true, 0.75, 0.85, 20)
+
+	if got := driveLossWindow(s, 0.84); got != 20 {
+		t.Fatalf("in-band parity should be clamped to the super cap 20, got %d", got)
+	}
+}
+
+func TestStreamServerSuperFECDropsAboveCeiling(t *testing.T) {
+	s := &Stream_server{ID: 23}
+	s.ConfigureAutoFEC(4, 2, 16, 0.3)
+	s.ConfigureSuperFEC(true, 0.75, 0.85, 0)
+
+	// First push loss into the band so FEC is on with elevated parity.
+	if got := driveLossWindow(s, 0.80); got <= 2 {
+		t.Fatalf("expected elevated parity in band, got %d", got)
+	}
+	// Now exceed the ceiling (~92%): server should stop escalating and relax to the
+	// base parity (2) rather than encode a giant block for a hopeless link.
+	if got := driveLossWindow(s, 0.92); got != 2 {
+		t.Fatalf("above ceiling parity should relax to base 2 (drop), got %d", got)
+	}
+}
+
+func TestStreamServerSuperFECDisabledUsesScaledParity(t *testing.T) {
+	s := &Stream_server{ID: 24}
+	s.ConfigureAutoFEC(4, 2, 64, 0.3)
+	s.ConfigureSuperFEC(false, 0.75, 0.85, 0)
+
+	// With Super-FEC off, 80% loss uses the normal ParityForLoss scaling, which is
+	// well above base but must not be forced to max/dropped.
+	got := driveLossWindow(s, 0.80)
+	if got < 3 {
+		t.Fatalf("expected scaled parity above base with Super-FEC off, got %d", got)
+	}
+}
+
 func TestStreamServerFECRoundTripWithLoss(t *testing.T) {
 	// block=4 data + parity=4 recovery -> any 4 of 8 shards reconstruct a block,
 	// i.e. each block survives up to 50% shard loss.

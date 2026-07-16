@@ -153,6 +153,18 @@ func (c *Client) runFullMTUTests(ctx context.Context) error {
 // it out of the active pool. It then applies the synced MTU, refreshes the
 // balancer, primes resolver-recheck metadata, and logs the outcome. It returns
 // the final set of connections kept in the active pool.
+// selectOperatingPoint chooses the session operating point over the given
+// connections, honoring the balancing strategy. In MTU-weighted mode it prefers
+// the highest MTU a viable subset (>= MTUWeightedMinPool resolvers) can sustain,
+// so higher-capability resolvers actually run at their higher MTU; every other
+// mode uses the throughput-optimal (D × pool) point.
+func (c *Client) selectOperatingPoint(conns []Connection) (uploadMTU, downloadMTU, poolSize int) {
+	if c.cfg.ResolverBalancingStrategy == BalancingMTUWeighted {
+		return selectMTUOperatingPointPreferHigh(conns, c.cfg.MTUWeightedMinPool)
+	}
+	return selectMTUOperatingPoint(conns)
+}
+
 func (c *Client) finalizeMTUSelection(validConns []Connection, minUpload, minDownload, minUploadChars int) []Connection {
 	// Cluster the full validated set BEFORE any demotion so every tier (including
 	// the slower ones that may be demoted) is visible in the UI.
@@ -161,7 +173,7 @@ func (c *Client) finalizeMTUSelection(validConns []Connection, minUpload, minDow
 
 	opUpload, opDownload, poolSize, backups := 0, 0, 0, 0
 	if c.cfg.MTUAdaptiveGrouping {
-		u, d, n := selectMTUOperatingPoint(validConns)
+		u, d, n := c.selectOperatingPoint(validConns)
 		// Only act when the optimal point actually excludes someone; otherwise it
 		// equals the global minimum and nothing changes.
 		if d > 0 && n > 0 && n < len(validConns) {
@@ -238,7 +250,7 @@ func (c *Client) recomputeMTUOperatingPoint() {
 	if len(conns) == 0 {
 		return
 	}
-	u, d, n := selectMTUOperatingPoint(conns)
+	u, d, n := c.selectOperatingPoint(conns)
 	if d <= 0 || n <= 0 {
 		return
 	}

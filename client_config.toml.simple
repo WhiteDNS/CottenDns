@@ -378,6 +378,14 @@ MTU_GROUP_GAP_RATIO = 0.25
 # keeping them in reserve. Set false to use the legacy global-minimum MTU across
 # all valid resolvers.
 MTU_ADAPTIVE_GROUPING = true
+# Applies only when RESOLVER_BALANCING_STRATEGY = 5 (MTU-weighted). In that mode
+# the session runs at the HIGHEST MTU a viable subset of resolvers can sustain,
+# rather than the throughput-optimal common denominator, so resolvers that support
+# a higher MTU actually use it. This is the minimum number of resolvers that must
+# sustain the raised MTU before it is adopted — a redundancy floor so a single
+# fast resolver cannot strand the session. Higher = safer/lower MTU, lower =
+# more aggressive/higher MTU. Default 2.
+MTU_WEIGHTED_MIN_POOL = 2
 
 # ------------------------------------------------------------------------------
 # 7) Runtime Workers, Queues, and Timers

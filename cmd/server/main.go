@@ -154,7 +154,13 @@ func main() {
 		)
 	}
 
-	log.Infof("\U0001F511 <green>Active Encryption Key: <yellow>%s</yellow></green>", keyInfo.Key)
+	// SECURITY: never log the raw key \u2014 logs may be shipped, cached, or shoulder-
+	// surfed. Emit only a non-reversible fingerprint so operators can still confirm
+	// client and server share the same key.
+	log.Infof(
+		"\U0001F511 <green>Active Encryption Key Fingerprint: <yellow>%s</yellow> <gray>(sha256; raw key never logged)</gray></green>",
+		security.KeyFingerprint(keyInfo.Key),
+	)
 	log.Debugf("\u25B6\uFE0F <green>Starting UDP Server...</green>")
 
 	if err := srv.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

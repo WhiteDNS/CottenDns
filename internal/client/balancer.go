@@ -710,21 +710,45 @@ func (b *Balancer) latencyScore(snap *balancerSnapshot, idx int) uint64 {
 	return sum / count
 }
 
+// mtuGoodputWeight returns the selection weight for a resolver as its effective
+// download *goodput* — the download MTU discounted by the fraction of packets it
+// actually delivers at that MTU (1 - measured loss). Weighting by goodput instead
+// of raw MTU makes transport selection robust against resolvers whose nominal MTU
+// overstates what they can carry: a resolver that was assigned a high MTU but
+// drops a large share of packets at it is automatically weighted down toward the
+// throughput it can really sustain, rather than being over-favored for its size.
+// Resolvers with an unknown (≤0) MTU get a unit weight so they stay reachable.
+func mtuGoodputWeight(conn *Connection) uint64 {
+	mtu := conn.DownloadMTUBytes
+	if mtu <= 0 {
+		return 1
+	}
+	loss := conn.DownloadMTULoss
+	if loss < 0 {
+		loss = 0
+	}
+	if loss > 1 {
+		loss = 1
+	}
+	weight := uint64(float64(mtu)*(1.0-loss) + 0.5)
+	if weight < 1 {
+		// Even a near-fully-lossy resolver keeps a floor weight so it is not starved
+		// entirely and can recover if its loss estimate improves.
+		weight = 1
+	}
+	return weight
+}
+
 // weightedByMTUConnection picks an active-pool resolver with probability
-// proportional to its download MTU. Resolvers with an unknown (≤0) MTU get a
-// unit weight so they are still reachable. Falls back to round-robin when there
-// is no usable weight signal.
+// proportional to its effective download goodput (MTU × delivery rate). Falls
+// back to round-robin when there is no usable weight signal.
 func (b *Balancer) weightedByMTUConnection(snap *balancerSnapshot) (Connection, bool) {
 	if snap == nil || len(snap.valid) == 0 {
 		return Connection{}, false
 	}
 	total := uint64(0)
 	for _, idx := range snap.valid {
-		w := snap.connections[idx].DownloadMTUBytes
-		if w <= 0 {
-			w = 1
-		}
-		total += uint64(w)
+		total += mtuGoodputWeight(&snap.connections[idx])
 	}
 	if total == 0 {
 		return b.roundRobinBestConnection(snap)
@@ -732,10 +756,7 @@ func (b *Balancer) weightedByMTUConnection(snap *balancerSnapshot) (Connection, 
 
 	r := b.nextRandom() % total
 	for _, idx := range snap.valid {
-		w := uint64(snap.connections[idx].DownloadMTUBytes)
-		if snap.connections[idx].DownloadMTUBytes <= 0 {
-			w = 1
-		}
+		w := mtuGoodputWeight(&snap.connections[idx])
 		if r < w {
 			return derefConnection(snap.connections, idx)
 		}

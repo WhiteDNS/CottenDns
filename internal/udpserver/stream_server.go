@@ -67,6 +67,19 @@ type Stream_server struct {
 	fecAutoBaseParity int
 	fecAutoMaxParity int
 	fecAutoThreshold float64
+	// Super-FEC: a last-ditch, loss-aware high-parity band for extreme loss. When
+	// enabled and measured loss enters [fecSuperLossFloor, fecSuperLossCeil], parity
+	// is scaled continuously to the *measured* loss (via fec.ParityForLoss), lifted
+	// above the normal auto ceiling up to fecSuperMaxParity — so 76% loss gets less
+	// protection than 84% instead of a flat slam. Above fecSuperLossCeil the link is
+	// treated as hopeless: the server stops escalating and relaxes to the base rate
+	// so it does not burn CPU/bandwidth encoding giant Reed-Solomon blocks for
+	// traffic that will not arrive anyway (the block is dropped from FEC and left to
+	// ARQ). fecSuperMaxParity == 0 means the Reed-Solomon hard limit for the block.
+	fecSuperEnabled   bool
+	fecSuperLossFloor float64
+	fecSuperLossCeil  float64
+	fecSuperMaxParity int
 	fecWindowData    atomic.Uint64
 	fecWindowResends atomic.Uint64
 }
@@ -425,6 +438,34 @@ func (s *Stream_server) ConfigureAutoFEC(blockSize, baseParity, maxParity int, t
 	s.fecAuto.Store(true)
 }
 
+// ConfigureSuperFEC arms the Super-FEC escalation band on top of auto-FEC. Only
+// takes effect when auto-FEC is also configured. floor/ceil are loss fractions
+// (0..1); the band is clamped to a sane order (floor <= ceil). maxParity caps the
+// per-block parity in the band (0 = the Reed-Solomon hard limit for the block).
+func (s *Stream_server) ConfigureSuperFEC(enabled bool, lossFloor, lossCeil float64, maxParity int) {
+	if s == nil {
+		return
+	}
+	if lossFloor < 0 {
+		lossFloor = 0
+	}
+	if lossCeil > 1 {
+		lossCeil = 1
+	}
+	if lossCeil < lossFloor {
+		lossCeil = lossFloor
+	}
+	if maxParity < 0 {
+		maxParity = 0
+	}
+	s.fecMu.Lock()
+	s.fecSuperEnabled = enabled
+	s.fecSuperLossFloor = lossFloor
+	s.fecSuperLossCeil = lossCeil
+	s.fecSuperMaxParity = maxParity
+	s.fecMu.Unlock()
+}
+
 // recordFECSample tallies a download data send (STREAM_DATA) or a retransmit
 // (STREAM_RESEND) into the current loss window. When the window fills it
 // re-evaluates whether to enable/scale auto FEC. Cheap no-op when auto is off.
@@ -462,6 +503,53 @@ func (s *Stream_server) maybeAdjustAutoFEC() {
 			s.fecEnc.SetParity(s.fecAutoBaseParity)
 		}
 		return
+	}
+
+	// Super-FEC banding. When enabled and loss is extreme, decide between a
+	// last-ditch maximum-parity rebuild attempt (inside the band) and giving up on
+	// FEC protection entirely (above the ceiling) so the server does not spend CPU
+	// encoding hopeless blocks.
+	if s.fecSuperEnabled {
+		if loss > s.fecSuperLossCeil {
+			// Beyond the ceiling the link is effectively dead: stop escalating and
+			// relax to the base rate. The unrecoverable block is left to ARQ rather
+			// than protected with a giant Reed-Solomon encode that would only strain
+			// the server. This is the "drop instead of rebuild" behavior.
+			if s.fecEnc != nil {
+				s.fecEnc.SetParity(s.fecAutoBaseParity)
+				if s.log != nil {
+					s.log.Debugf("Stream %d: Super-FEC disengaged (loss=%.0f%% > %.0f%% ceiling) — dropping FEC protection to spare server", s.ID, loss*100, s.fecSuperLossCeil*100)
+				}
+			}
+			return
+		}
+		if loss >= s.fecSuperLossFloor {
+			// Inside the Super-FEC band: scale parity to the *measured* loss so the
+			// code rate tracks how bad the link actually is, lifted above the normal
+			// auto ceiling up to the super cap (0 = Reed-Solomon hard limit). This is
+			// loss-aware, not a flat slam: 76% loss buys less parity than 84%.
+			parity := fec.ParityForLoss(s.fecAutoBlock, loss)
+			superCap := s.fecSuperMaxParity
+			hardMax := fec.MaxParity(s.fecAutoBlock)
+			if superCap <= 0 || superCap > hardMax {
+				superCap = hardMax
+			}
+			if parity > superCap {
+				parity = superCap
+			}
+			if parity < s.fecAutoBaseParity {
+				parity = s.fecAutoBaseParity
+			}
+			if s.fecEnc == nil {
+				s.fecEnc = fec.NewEncoder(s.fecAutoBlock, parity)
+			} else {
+				s.fecEnc.SetParity(parity)
+			}
+			if s.log != nil {
+				s.log.Debugf("Stream %d: Super-FEC engaged (loss=%.0f%%, parity=%d, cap=%d)", s.ID, loss*100, parity, superCap)
+			}
+			return
+		}
 	}
 
 	parity := fec.ParityForLoss(s.fecAutoBlock, loss)

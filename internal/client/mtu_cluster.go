@@ -134,6 +134,72 @@ func selectMTUOperatingPoint(conns []Connection) (uploadMTU, downloadMTU, poolSi
 	return uploadMTU, downloadMTU, poolSize
 }
 
+// selectMTUOperatingPointPreferHigh chooses the highest-MTU operating point the
+// resolver fleet can sustain while keeping at least minPool resolvers in the
+// active tier for redundancy. It is the selection policy for MTU-weighted
+// balancing: rather than dragging every resolver down to the throughput-optimal
+// common denominator, it lets the session run at the largest MTU a viable subset
+// supports, so resolvers that can carry a higher MTU actually do. Resolvers below
+// the chosen point are demoted to the backup tier by the caller.
+//
+// Among all per-resolver (upload, download) candidates whose sustaining pool has
+// at least minPool members, it picks the largest download MTU (tie-break: larger
+// upload, then larger pool). If no candidate reaches minPool (e.g. a tiny fleet),
+// it falls back to the throughput-optimal point so a single fast outlier can
+// never strand the session. minPool < 1 is treated as 1.
+func selectMTUOperatingPointPreferHigh(conns []Connection, minPool int) (uploadMTU, downloadMTU, poolSize int) {
+	if minPool < 1 {
+		minPool = 1
+	}
+	type cand struct{ upload, download int }
+	cands := make([]cand, 0, len(conns))
+	for _, c := range conns {
+		if c.IsValid && c.DownloadMTUBytes > 0 && c.UploadMTUBytes > 0 {
+			cands = append(cands, cand{c.UploadMTUBytes, c.DownloadMTUBytes})
+		}
+	}
+	if len(cands) == 0 {
+		return 0, 0, 0
+	}
+
+	for _, floor := range cands {
+		pool := 0
+		minUpload, minDownload := 0, 0
+		for _, c := range cands {
+			if c.upload < floor.upload || c.download < floor.download {
+				continue
+			}
+			pool++
+			if minUpload == 0 || c.upload < minUpload {
+				minUpload = c.upload
+			}
+			if minDownload == 0 || c.download < minDownload {
+				minDownload = c.download
+			}
+		}
+		if pool < minPool {
+			continue
+		}
+		// Prefer the highest download MTU; tie-break toward larger upload, then a
+		// larger pool for extra redundancy at the same MTU.
+		better := minDownload > downloadMTU ||
+			(minDownload == downloadMTU && minUpload > uploadMTU) ||
+			(minDownload == downloadMTU && minUpload == uploadMTU && pool > poolSize)
+		if better {
+			uploadMTU = minUpload
+			downloadMTU = minDownload
+			poolSize = pool
+		}
+	}
+
+	if downloadMTU == 0 {
+		// Fleet too small to satisfy minPool at any raised MTU — do not strand it on
+		// a lone fast resolver; use the throughput-optimal point instead.
+		return selectMTUOperatingPoint(conns)
+	}
+	return uploadMTU, downloadMTU, poolSize
+}
+
 // buildMTUGroup computes a group's safe (minimum) upload/download MTU across its
 // members. Upload MTU ignores members reporting 0 (upload not measured), but
 // falls back to the minimum seen so the value is never larger than any member.

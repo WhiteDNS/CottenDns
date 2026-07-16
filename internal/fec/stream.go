@@ -102,6 +102,11 @@ func (e *Encoder) Buffered() int {
 	return len(e.buf)
 }
 
+// Parity reports the parity-shard count currently in effect for new blocks.
+func (e *Encoder) Parity() int {
+	return e.parity
+}
+
 // SetParity adjusts the parity-shard count for subsequent blocks (e.g. as the
 // measured loss changes). It takes effect at the next block boundary.
 func (e *Encoder) SetParity(parity int) {

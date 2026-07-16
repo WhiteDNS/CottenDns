@@ -184,6 +184,9 @@ type sessionStore struct {
 	orphanQueueCap         int
 	streamQueueCap         int
 	maxStreamsPerSession   int
+	// maxActiveSessions caps how many sessions may be live at once. 0 means fall
+	// back to the hard slot ceiling (maxServerSessionSlots).
+	maxActiveSessions      int
 	sessionInitTTL         time.Duration
 	recentlyClosedTTL      time.Duration
 	recentlyClosedCap      int
@@ -215,6 +218,7 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 	recentlyClosedTTL := 600 * time.Second
 	recentlyClosedCap := 2000
 	maxStreamsPerSession := 0
+	maxActiveSessions := 0
 	if len(options) > 0 {
 		if v, ok := options[0].(time.Duration); ok && v > 0 {
 			sessionInitTTL = v
@@ -235,6 +239,11 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 			maxStreamsPerSession = v
 		}
 	}
+	if len(options) > 4 {
+		if v, ok := options[4].(int); ok && v > 0 {
+			maxActiveSessions = v
+		}
+	}
 	return &sessionStore{
 		activeIDs:            make(map[uint16]struct{}, 64),
 		bySig:                make(map[[sessionInitDataSize]byte]uint16, 64),
@@ -244,6 +253,7 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 		orphanQueueCap:       orphanQueueCap,
 		streamQueueCap:       streamQueueCap,
 		maxStreamsPerSession: maxStreamsPerSession,
+		maxActiveSessions:    maxActiveSessions,
 		sessionInitTTL:       sessionInitTTL,
 		recentlyClosedTTL:    recentlyClosedTTL,
 		recentlyClosedCap:    recentlyClosedCap,
@@ -540,7 +550,11 @@ func (s *sessionStore) SweepRecentlyClosedStreams(now time.Time) {
 }
 
 func (s *sessionStore) allocateSlotLocked() int {
-	if s.activeCount >= maxServerSessionSlots {
+	cap := s.maxActiveSessions
+	if cap <= 0 || cap > maxServerSessionSlots {
+		cap = maxServerSessionSlots
+	}
+	if int(s.activeCount) >= cap {
 		return -1
 	}
 
