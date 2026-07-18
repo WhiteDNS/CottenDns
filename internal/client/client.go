@@ -88,10 +88,12 @@ type Client struct {
 	downloadCompression uint8
 
 	// queryTypes is the validated set of DNS record types to rotate tunnel
-	// queries over (A1). Always non-empty; queryTypeCursor drives round-robin
-	// selection across it. A single-element set means "always that type".
+	// queries over (A1). Always non-empty. The carrier selector drives adaptive
+	// selection with fallback; queryTypeCursor is the plain round-robin fallback
+	// used only by directly-constructed test clients (carrier == nil).
 	queryTypes      []uint16
 	queryTypeCursor atomic.Uint32
+	carrier         *carrierSelector
 
 	// DNS query-shaping knobs (client-only, server-transparent). See the matching
 	// config keys DNS_RANDOMIZE_QUERY_ID / DNS_EDNS_COOKIE /
@@ -462,6 +464,7 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 		c.streamResolverFailoverCooldown = time.Second
 	}
 
+	c.carrier = newCarrierSelector(c.queryTypes, c.now)
 	c.pingManager = newPingManager(c)
 	return c
 }

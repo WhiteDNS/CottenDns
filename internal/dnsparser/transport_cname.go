@@ -39,6 +39,13 @@ func firstQuestionQType(packet []byte) (uint16, bool) {
 	return binary.BigEndian.Uint16(packet[nextOffset : nextOffset+2]), true
 }
 
+// FirstQuestionQType returns the QTYPE of the first question in a DNS packet. A
+// tunnel response echoes the query's record type, so the client uses this to
+// attribute a decoded response to the carrier (record type) that delivered it.
+func FirstQuestionQType(packet []byte) (uint16, bool) {
+	return firstQuestionQType(packet)
+}
+
 // BuildVPNResponsePacketMatchingQuery builds a tunnel response whose answer RR
 // type matches the query type when possible (A2):
 //

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	DnsParser "cottendns-go/internal/dnsparser"
 	Enums "cottendns-go/internal/enums"
 )
 
@@ -147,6 +148,13 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAddr string, receivedAt time.Time) {
 	if c == nil || len(packet) < 2 || addr == nil {
 		return
+	}
+
+	// Carrier attribution: a decoded response means the record type it was sent
+	// as (echoed in the response's question) is working on this network. Feeds
+	// adaptive carrier fallback (see carrier_selector.go).
+	if qType, ok := DnsParser.FirstQuestionQType(packet); ok {
+		c.carrier.recordSuccess(qType)
 	}
 
 	key := resolverSampleKey{

@@ -39,7 +39,16 @@ func normalizeRuntimeQueryTypes(codes []uint16) []uint16 {
 // purely a query-fingerprint measure and never affects decodability. A
 // single-element set always returns that one type (e.g. the default TXT-only).
 func (c *Client) nextQueryType() uint16 {
-	if c == nil || len(c.queryTypes) == 0 {
+	if c == nil {
+		return Enums.DNS_RECORD_TYPE_TXT
+	}
+	// Adaptive selection with automatic fallback (steers away from blocked/poisoned
+	// carriers, re-explores recovered ones). See carrier_selector.go.
+	if c.carrier != nil {
+		return c.carrier.next()
+	}
+	// Fallback for directly-constructed test clients: plain round-robin.
+	if len(c.queryTypes) == 0 {
 		return Enums.DNS_RECORD_TYPE_TXT
 	}
 	if len(c.queryTypes) == 1 {
