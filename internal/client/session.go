@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -59,47 +59,117 @@ func (c *Client) InitializeSession(maxAttempts int) error {
 	return ErrSessionInitFailed
 }
 
+// sessionInitRaceCount is how many distinct resolvers a single SESSION_INIT is
+// raced across. The server keys sessions by the init signature and reuses within
+// SESSION_INIT_REUSE_TTL, so the identical init reaching it via several resolvers
+// yields one session (whichever answers first wins) — no duplicate sessions.
+// Racing turns a slow serial "try one, wait a full timeout, try the next" connect
+// into "ask a few at once, take the first reply", which is a large win on lossy
+// networks where any single resolver may be dead.
+const sessionInitRaceCount = 3
+
 func (c *Client) initializeSessionOnce() error {
-	conn, initPayload, verifyCode, err := c.nextSessionInitAttempt()
+	conns, initPayload, verifyCode, err := c.nextSessionInitRacers(sessionInitRaceCount)
 	if err != nil {
 		return err
 	}
+	timeout := c.mtuTestTimeout * 3
 
+	if len(conns) == 1 {
+		return c.exchangeSessionInit(conns[0], initPayload, verifyCode, timeout)
+	}
+
+	type initResult struct {
+		packet VpnProto.Packet
+		ok     bool
+	}
+	// Buffered to len(conns) so stragglers can always send their result and exit
+	// even after we have already returned on the first ACCEPT (no goroutine leak).
+	results := make(chan initResult, len(conns))
+	for _, conn := range conns {
+		go func(conn Connection) {
+			query, buildErr := c.buildSessionQuery(conn.Domain, Enums.PACKET_SESSION_INIT, initPayload)
+			if buildErr != nil {
+				results <- initResult{}
+				return
+			}
+			packet, exErr := c.exchangeDNSOverConnection(conn, query, timeout)
+			results <- initResult{packet: packet, ok: exErr == nil}
+		}(conn)
+	}
+
+	sawBusy := false
+	for i := 0; i < len(conns); i++ {
+		res := <-results
+		if !res.ok {
+			continue
+		}
+		switch {
+		case res.packet.PacketType == Enums.PACKET_SESSION_ACCEPT:
+			if c.applySessionAccept(res.packet, initPayload, verifyCode) {
+				return nil
+			}
+		case c.isSessionBusy(res.packet, verifyCode):
+			sawBusy = true
+		}
+	}
+	if sawBusy {
+		c.setSessionInitBusyUntil(time.Now().Add(c.cfg.SessionInitBusyRetryInterval()))
+		return ErrSessionInitBusy
+	}
+	return ErrSessionInitFailed
+}
+
+// exchangeSessionInit runs a single-resolver SESSION_INIT (also the fallback when
+// only one valid resolver exists). Behaviour is identical to the pre-race path.
+func (c *Client) exchangeSessionInit(conn Connection, initPayload []byte, verifyCode [4]byte, timeout time.Duration) error {
 	query, err := c.buildSessionQuery(conn.Domain, Enums.PACKET_SESSION_INIT, initPayload)
 	if err != nil {
 		return ErrSessionInitFailed
 	}
-
-	packet, err := c.exchangeDNSOverConnection(conn, query, c.mtuTestTimeout*3)
+	packet, err := c.exchangeDNSOverConnection(conn, query, timeout)
 	if err != nil {
 		return ErrSessionInitFailed
 	}
-
-	switch packet.PacketType {
-	case Enums.PACKET_SESSION_BUSY:
-		if len(packet.Payload) < sessionBusyPayloadSize || !bytes.Equal(packet.Payload[:sessionBusyPayloadSize], verifyCode[:]) {
-			return ErrSessionInitFailed
+	switch {
+	case packet.PacketType == Enums.PACKET_SESSION_ACCEPT:
+		if c.applySessionAccept(packet, initPayload, verifyCode) {
+			return nil
 		}
+		return ErrSessionInitFailed
+	case c.isSessionBusy(packet, verifyCode):
 		c.setSessionInitBusyUntil(time.Now().Add(c.cfg.SessionInitBusyRetryInterval()))
 		return ErrSessionInitBusy
-	case Enums.PACKET_SESSION_ACCEPT:
-		if len(packet.Payload) < sessionAcceptPayloadSize || !bytes.Equal(packet.Payload[4:8], verifyCode[:]) {
-			return ErrSessionInitFailed
-		}
-
-		c.sessionID = uint16(packet.Payload[0])<<8 | uint16(packet.Payload[1])
-		c.sessionCookie = packet.Payload[2]
-		c.responseMode = initPayload[0]
-		c.uploadCompression, c.downloadCompression = compression.SplitPair(packet.Payload[3])
-		c.sessionReady = true
-		c.applySessionCompressionPolicy()
-		c.clearSessionInitBusyUntil()
-		c.resetSessionInitState()
-		c.clearSessionResetPending()
-		return nil
 	default:
 		return ErrSessionInitFailed
 	}
+}
+
+// applySessionAccept validates a SESSION_ACCEPT against the init verify code and,
+// on success, commits the session state and returns true. Invoked only from the
+// single init collector goroutine, so the state writes are unsynchronized exactly
+// as in the original sequential path.
+func (c *Client) applySessionAccept(packet VpnProto.Packet, initPayload []byte, verifyCode [4]byte) bool {
+	if len(packet.Payload) < sessionAcceptPayloadSize || !bytes.Equal(packet.Payload[4:8], verifyCode[:]) {
+		return false
+	}
+	c.sessionID = uint16(packet.Payload[0])<<8 | uint16(packet.Payload[1])
+	c.sessionCookie = packet.Payload[2]
+	c.responseMode = initPayload[0]
+	c.uploadCompression, c.downloadCompression = compression.SplitPair(packet.Payload[3])
+	c.sessionReady = true
+	c.applySessionCompressionPolicy()
+	c.clearSessionInitBusyUntil()
+	c.resetSessionInitState()
+	c.clearSessionResetPending()
+	return true
+}
+
+// isSessionBusy reports whether packet is a SESSION_BUSY that matches our init.
+func (c *Client) isSessionBusy(packet VpnProto.Packet, verifyCode [4]byte) bool {
+	return packet.PacketType == Enums.PACKET_SESSION_BUSY &&
+		len(packet.Payload) >= sessionBusyPayloadSize &&
+		bytes.Equal(packet.Payload[:sessionBusyPayloadSize], verifyCode[:])
 }
 
 func (c *Client) buildSessionInitPayload() ([]byte, bool, [4]byte, error) {
@@ -165,6 +235,58 @@ func (c *Client) nextSessionInitAttempt() (Connection, []byte, [4]byte, error) {
 	}
 
 	return Connection{}, nil, empty, ErrNoValidConnections
+}
+
+// nextSessionInitRacers returns up to n distinct valid resolvers to race a single
+// SESSION_INIT across, all sharing one init payload/verify code. The cursor is
+// advanced past every returned resolver so successive attempts rotate onward. It
+// is the multi-resolver generalisation of nextSessionInitAttempt; with n==1 it is
+// equivalent.
+func (c *Client) nextSessionInitRacers(n int) ([]Connection, []byte, [4]byte, error) {
+	var empty [4]byte
+	if c == nil || n < 1 {
+		return nil, nil, empty, ErrSessionInitFailed
+	}
+
+	c.initStateMu.Lock()
+	defer c.initStateMu.Unlock()
+
+	if !c.sessionInitReady {
+		payload, responseBase64, verifyCode, err := c.buildSessionInitPayload()
+		if err != nil {
+			return nil, nil, empty, err
+		}
+		c.sessionInitPayload = payload
+		c.sessionInitBase64 = responseBase64
+		c.sessionInitVerify = verifyCode
+		c.sessionInitReady = true
+		c.sessionInitCursor = 0
+	}
+
+	snap := c.balancer.snapshot.Load()
+	if snap == nil || len(snap.valid) == 0 {
+		return nil, nil, empty, ErrNoValidConnections
+	}
+
+	validLen := len(snap.valid)
+	if n > validLen {
+		n = validLen
+	}
+	conns := make([]Connection, 0, n)
+	start := c.sessionInitCursor
+	for checked := 0; checked < validLen && len(conns) < n; checked++ {
+		idxInValid := (start + checked) % validLen
+		conn, ok := derefConnection(snap.connections, snap.valid[idxInValid])
+		if !ok {
+			continue
+		}
+		conns = append(conns, conn)
+		c.sessionInitCursor = (idxInValid + 1) % validLen
+	}
+	if len(conns) == 0 {
+		return nil, nil, empty, ErrNoValidConnections
+	}
+	return conns, c.sessionInitPayload, c.sessionInitVerify, nil
 }
 
 func (c *Client) resetSessionInitState() {
