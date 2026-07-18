@@ -372,7 +372,13 @@ func defaultClientConfig() ClientConfig {
 		ARQControlInitialRTOSeconds:           0.5,
 		ARQControlMaxRTOSeconds:               2.0,
 		ARQMaxControlRetries:                  120,
-		ARQInactivityTimeoutSeconds:           1800.0,
+		// A stalled/half-open stream (server stopped answering, lost FIN) is only
+		// reaped once ARQ declares it inactive, so 1800s (30 min) let dead streams
+		// pile up in active_streams on lossy links, bloating the per-tick reap
+		// scan. 600s still tolerates genuinely idle-but-alive connections (a
+		// slow-but-progressing stream keeps resetting its activity clock and is
+		// never reaped) while draining dead ones ~3x sooner.
+		ARQInactivityTimeoutSeconds:           600.0,
 		ARQDataPacketTTLSeconds:               2400.0,
 		ARQControlPacketTTLSeconds:            1200.0,
 		ARQMaxDataRetries:                     120,
@@ -615,7 +621,7 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	cfg.ARQControlInitialRTOSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQControlInitialRTOSeconds, 1.0), 0.05, 60.0)
 	cfg.ARQControlMaxRTOSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQControlMaxRTOSeconds, 8.0), cfg.ARQControlInitialRTOSeconds, 120.0)
 	cfg.ARQMaxControlRetries = clampInt(defaultIntBelow(cfg.ARQMaxControlRetries, 1, 80), 5, 5000)
-	cfg.ARQInactivityTimeoutSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQInactivityTimeoutSeconds, 1800.0), 30.0, 86400.0)
+	cfg.ARQInactivityTimeoutSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQInactivityTimeoutSeconds, 600.0), 30.0, 86400.0)
 	cfg.ARQDataPacketTTLSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQDataPacketTTLSeconds, 1800.0), 30.0, 86400.0)
 	cfg.ARQControlPacketTTLSeconds = clampFloat(defaultFloatAtMostZero(cfg.ARQControlPacketTTLSeconds, 900.0), 30.0, 86400.0)
 	cfg.ARQMaxDataRetries = clampInt(defaultIntBelow(cfg.ARQMaxDataRetries, 1, 800), 60, 100000)

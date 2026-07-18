@@ -30,8 +30,10 @@ import (
 
 const (
 	pacerBaseInterval = 8 * time.Millisecond
-	pacerMaxInterval  = 400 * time.Millisecond
-	pacerRecoverStep  = 3 * time.Millisecond
+	// Cap on a single resolver's cooldown window. 400ms throttled a maxed-out
+	// resolver to ~2.5 queries/sec; 200ms (~5/sec) still redistributes load off a
+	// struggling resolver without starving aggregate throughput on lossy links.
+	pacerMaxInterval = 200 * time.Millisecond
 )
 
 type resolverPacer struct {
@@ -116,8 +118,12 @@ func (p *resolverPacer) success(key string) {
 	if s.interval <= 0 {
 		return
 	}
-	s.interval -= pacerRecoverStep
-	if s.interval <= 0 {
+	// Multiplicative recovery mirrors the x2 backoff in throttle(): a recovering
+	// resolver sheds its cooldown as fast as it accrued it. The old fixed 3ms step
+	// could not keep pace with the doubling, so intervals ratcheted to the cap
+	// under sustained loss and throttled throughput on long sessions.
+	s.interval /= 2
+	if s.interval < pacerBaseInterval {
 		s.interval = 0
 		s.pacedUntil = time.Time{}
 	}

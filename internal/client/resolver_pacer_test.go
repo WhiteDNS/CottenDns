@@ -38,7 +38,7 @@ func TestResolverPacer_ThrottleAndRecover(t *testing.T) {
 		t.Fatal("backoff window should grow with repeated throttles")
 	}
 
-	// Enough successes fully un-pace the resolver (additive recovery to zero).
+	// Enough successes fully un-pace the resolver (multiplicative recovery to zero).
 	for i := 0; i < 1000; i++ {
 		p.success("r1")
 	}
