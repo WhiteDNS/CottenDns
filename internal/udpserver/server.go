@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -51,6 +51,8 @@ type Server struct {
 	dnsCache                 *dnsCache.Store
 	dnsResolveInflight       *dnsResolveInflightManager
 	dnsUpstreamServers       []string
+	dnsUpstreamHealthMu      sync.Mutex
+	dnsUpstreamHealth        map[string]*dnsUpstreamHealthState
 	dnsUpstreamBufferPool    sync.Pool
 	dnsFragments             *fragmentStore.Store[dnsFragmentKey]
 	socks5Fragments          *fragmentStore.Store[socks5FragmentKey]
@@ -94,6 +96,10 @@ type Server struct {
 	fragmentInvalidHeader   atomic.Uint64
 	upstreamPanicsRecovered atomic.Uint64
 	cleanupPanicsRecovered  atomic.Uint64
+	dnsUpstreamQueries      atomic.Uint64
+	dnsUpstreamFailures     atomic.Uint64
+	dnsUpstreamHedges       atomic.Uint64
+	dnsUpstreamTCPFallbacks atomic.Uint64
 }
 
 // Stats is a point-in-time snapshot of operational counters maintained by the
@@ -109,6 +115,12 @@ type Stats struct {
 	FragmentInvalidHeader   uint64
 	UpstreamPanicsRecovered uint64
 	CleanupPanicsRecovered  uint64
+	ActiveSessions          uint64
+	ActiveStreams           uint64
+	DNSUpstreamQueries      uint64
+	DNSUpstreamFailures     uint64
+	DNSUpstreamHedges       uint64
+	DNSUpstreamTCPFallbacks uint64
 }
 
 // Stats returns a consistent snapshot of the server's observability counters.
@@ -123,6 +135,7 @@ func (s *Server) Stats() Stats {
 	if s.socks5Fragments != nil {
 		fragmentConflicts += s.socks5Fragments.ConflictCount()
 	}
+	activeSessions, activeStreams := s.sessions.operationalCounts()
 	return Stats{
 		DroppedPackets:          s.droppedPackets.Load(),
 		DeferredDroppedPackets:  s.deferredDroppedPackets.Load(),
@@ -132,6 +145,12 @@ func (s *Server) Stats() Stats {
 		FragmentInvalidHeader:   s.fragmentInvalidHeader.Load(),
 		UpstreamPanicsRecovered: s.upstreamPanicsRecovered.Load(),
 		CleanupPanicsRecovered:  s.cleanupPanicsRecovered.Load(),
+		ActiveSessions:          activeSessions,
+		ActiveStreams:           activeStreams,
+		DNSUpstreamQueries:      s.dnsUpstreamQueries.Load(),
+		DNSUpstreamFailures:     s.dnsUpstreamFailures.Load(),
+		DNSUpstreamHedges:       s.dnsUpstreamHedges.Load(),
+		DNSUpstreamTCPFallbacks: s.dnsUpstreamTCPFallbacks.Load(),
 	}
 }
 
@@ -182,6 +201,7 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 		),
 		dnsResolveInflight: newDNSResolveInflightManager(dnsFragmentTimeout),
 		dnsUpstreamServers: append([]string(nil), cfg.DNSUpstreamServers...),
+		dnsUpstreamHealth:  make(map[string]*dnsUpstreamHealthState, len(cfg.DNSUpstreamServers)),
 		dnsFragments:       fragmentStore.New[dnsFragmentKey](cfg.DNSFragmentStoreCapacity),
 		socks5Fragments:    fragmentStore.New[socks5FragmentKey](cfg.SOCKS5FragmentStoreCapacity),
 		dnsFragmentTimeout: dnsFragmentTimeout,

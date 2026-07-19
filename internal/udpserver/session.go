@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -178,18 +178,18 @@ type sessionStore struct {
 	// activeIDs is the set of currently-allocated session IDs. It lets the
 	// background sweeps iterate only live sessions instead of scanning the full
 	// 65536-slot byID array, which matters now that the session cap is uint16.
-	activeIDs              map[uint16]struct{}
-	bySig                  map[[sessionInitDataSize]byte]uint16
-	recentClosed           map[uint16]closedSessionRecord
-	orphanQueueCap         int
-	streamQueueCap         int
-	maxStreamsPerSession   int
+	activeIDs            map[uint16]struct{}
+	bySig                map[[sessionInitDataSize]byte]uint16
+	recentClosed         map[uint16]closedSessionRecord
+	orphanQueueCap       int
+	streamQueueCap       int
+	maxStreamsPerSession int
 	// maxActiveSessions caps how many sessions may be live at once. 0 means fall
 	// back to the hard slot ceiling (maxServerSessionSlots).
-	maxActiveSessions      int
-	sessionInitTTL         time.Duration
-	recentlyClosedTTL      time.Duration
-	recentlyClosedCap      int
+	maxActiveSessions int
+	sessionInitTTL    time.Duration
+	recentlyClosedTTL time.Duration
+	recentlyClosedCap int
 	// streamCapRejections counts every getOrCreateStream call that was
 	// refused because MaxStreams had been reached. The pointer is shared
 	// with each sessionRecord so the cap-enforcement path can increment it
@@ -291,20 +291,20 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 	}
 
 	record := &sessionRecord{
-		ID:                uint16(slot),
-		ResponseMode:      payload[0],
-		CreatedAt:         now,
-		ReuseUntil:        now.Add(s.sessionInitTTL),
-		Signature:         signature,
+		ID:                  uint16(slot),
+		ResponseMode:        payload[0],
+		CreatedAt:           now,
+		ReuseUntil:          now.Add(s.sessionInitTTL),
+		Signature:           signature,
 		Streams:             make(map[uint16]*Stream_server),
 		ActiveStreams:       make([]uint16, 0, 8),
 		StreamQueueCap:      s.streamQueueCap,
 		MaxStreams:          s.maxStreamsPerSession,
 		streamCapRejections: &s.streamCapRejections,
 		RecentlyClosed:      make(map[uint16]recentlyClosedStreamRecord, 8),
-		RecentlyClosedTTL: s.recentlyClosedTTL,
-		RecentlyClosedCap: s.recentlyClosedCap,
-		OrphanQueue:       mlq.New[VpnProto.Packet](s.orphanQueueCap),
+		RecentlyClosedTTL:   s.recentlyClosedTTL,
+		RecentlyClosedCap:   s.recentlyClosedCap,
+		OrphanQueue:         mlq.New[VpnProto.Packet](s.orphanQueueCap),
 	}
 
 	// Initialize virtual Stream 0 for control packets
@@ -526,6 +526,9 @@ func (s *sessionStore) Cleanup(now time.Time, idleTimeout time.Duration, closedR
 // activeRecordsSnapshot returns the live session records, iterating only the
 // active-ID set (not the full 65536-slot byID array).
 func (s *sessionStore) activeRecordsSnapshot() []*sessionRecord {
+	if s == nil {
+		return nil
+	}
 	s.mu.RLock()
 	records := make([]*sessionRecord, 0, len(s.activeIDs))
 	for id := range s.activeIDs {
@@ -535,6 +538,20 @@ func (s *sessionStore) activeRecordsSnapshot() []*sessionRecord {
 	}
 	s.mu.RUnlock()
 	return records
+}
+
+func (s *sessionStore) operationalCounts() (sessions uint64, streams uint64) {
+	for _, record := range s.activeRecordsSnapshot() {
+		sessions++
+		record.StreamsMu.RLock()
+		for id := range record.Streams {
+			if id != 0 {
+				streams++
+			}
+		}
+		record.StreamsMu.RUnlock()
+	}
+	return sessions, streams
 }
 
 func (s *sessionStore) SweepTerminalStreams(now time.Time, retention time.Duration) {

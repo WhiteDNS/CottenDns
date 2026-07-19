@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -8,8 +8,11 @@
 package udpserver
 
 import (
+	"encoding/binary"
 	"errors"
+	"io"
 	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +23,12 @@ import (
 )
 
 var ErrInvalidDNSUpstream = errors.New("invalid dns upstream")
+
+type dnsUpstreamHealthState struct {
+	ewmaLatency         time.Duration
+	consecutiveFailures int
+	cooldownUntil       time.Time
+}
 
 type dnsFragmentKey struct {
 	sessionID   uint16
@@ -272,16 +281,18 @@ func (s *Server) resolveDNSUpstream(rawQuery []byte) ([]byte, error) {
 		timeout = 4 * time.Second
 	}
 
+	upstreams := s.orderedDNSUpstreams(time.Now())
+
 	// Fast path: single upstream, no need for hedged requests.
-	if len(s.dnsUpstreamServers) == 1 {
-		resp, err := s.queryOneUpstream(s.dnsUpstreamServers[0], rawQuery, timeout)
+	if len(upstreams) == 1 {
+		resp, err := s.queryTrackedUpstream(upstreams[0], rawQuery, timeout)
 		if err != nil || len(resp) == 0 {
 			return nil, ErrInvalidDNSUpstream
 		}
 		return resp, nil
 	}
 
-	resultCh := make(chan []byte, len(s.dnsUpstreamServers))
+	resultCh := make(chan []byte, len(upstreams))
 	launch := func(upstream string) {
 		go func(addr string) {
 			// Recover so a panicking upstream never deadlocks
@@ -302,7 +313,7 @@ func (s *Server) resolveDNSUpstream(rawQuery []byte) ([]byte, error) {
 					resultCh <- nil
 				}
 			}()
-			resp, err := s.queryOneUpstream(addr, rawQuery, timeout)
+			resp, err := s.queryTrackedUpstream(addr, rawQuery, timeout)
 			if err == nil && len(resp) > 0 {
 				resultCh <- resp
 				return
@@ -311,7 +322,7 @@ func (s *Server) resolveDNSUpstream(rawQuery []byte) ([]byte, error) {
 		}(upstream)
 	}
 
-	launch(s.dnsUpstreamServers[0])
+	launch(upstreams[0])
 
 	hedgeDelay := dnsUpstreamHedgeDelay(timeout)
 	hedgeTimer := time.NewTimer(hedgeDelay)
@@ -329,10 +340,11 @@ func (s *Server) resolveDNSUpstream(rawQuery []byte) ([]byte, error) {
 			return
 		}
 		hedged = true
-		for _, upstream := range s.dnsUpstreamServers[1:] {
+		for _, upstream := range upstreams[1:] {
 			launch(upstream)
 			launched++
 		}
+		s.dnsUpstreamHedges.Add(uint64(len(upstreams) - 1))
 	}
 
 	for received < launched {
@@ -362,6 +374,74 @@ func (s *Server) resolveDNSUpstream(rawQuery []byte) ([]byte, error) {
 	return nil, ErrInvalidDNSUpstream
 }
 
+func (s *Server) orderedDNSUpstreams(now time.Time) []string {
+	ordered := append([]string(nil), s.dnsUpstreamServers...)
+	s.dnsUpstreamHealthMu.Lock()
+	defer s.dnsUpstreamHealthMu.Unlock()
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a := s.dnsUpstreamHealth[ordered[i]]
+		b := s.dnsUpstreamHealth[ordered[j]]
+		if a == nil {
+			a = &dnsUpstreamHealthState{}
+		}
+		if b == nil {
+			b = &dnsUpstreamHealthState{}
+		}
+		aCooling := now.Before(a.cooldownUntil)
+		bCooling := now.Before(b.cooldownUntil)
+		if aCooling != bCooling {
+			return !aCooling
+		}
+		if a.consecutiveFailures != b.consecutiveFailures {
+			return a.consecutiveFailures < b.consecutiveFailures
+		}
+		if a.ewmaLatency == 0 {
+			return b.ewmaLatency != 0
+		}
+		if b.ewmaLatency == 0 {
+			return false
+		}
+		return a.ewmaLatency < b.ewmaLatency
+	})
+	return ordered
+}
+
+func (s *Server) queryTrackedUpstream(upstream string, rawQuery []byte, timeout time.Duration) ([]byte, error) {
+	started := time.Now()
+	s.dnsUpstreamQueries.Add(1)
+	resp, err := s.queryOneUpstream(upstream, rawQuery, timeout)
+	s.recordDNSUpstreamResult(upstream, time.Since(started), err == nil && len(resp) > 0)
+	if err != nil || len(resp) == 0 {
+		s.dnsUpstreamFailures.Add(1)
+	}
+	return resp, err
+}
+
+func (s *Server) recordDNSUpstreamResult(upstream string, latency time.Duration, success bool) {
+	s.dnsUpstreamHealthMu.Lock()
+	defer s.dnsUpstreamHealthMu.Unlock()
+	state := s.dnsUpstreamHealth[upstream]
+	if state == nil {
+		state = &dnsUpstreamHealthState{}
+		s.dnsUpstreamHealth[upstream] = state
+	}
+	if success {
+		state.consecutiveFailures = 0
+		state.cooldownUntil = time.Time{}
+		if state.ewmaLatency == 0 {
+			state.ewmaLatency = latency
+		} else {
+			state.ewmaLatency = (state.ewmaLatency*3 + latency) / 4
+		}
+		return
+	}
+	state.consecutiveFailures++
+	if state.consecutiveFailures >= 2 {
+		backoff := time.Second << min(state.consecutiveFailures-2, 5)
+		state.cooldownUntil = time.Now().Add(backoff)
+	}
+}
+
 func dnsUpstreamHedgeDelay(timeout time.Duration) time.Duration {
 	delay := timeout / 5
 	if delay < 100*time.Millisecond {
@@ -379,6 +459,15 @@ func dnsUpstreamHedgeDelay(timeout time.Duration) time.Duration {
 // queryOneUpstream sends rawQuery to a single upstream DNS server and returns
 // the response. It is safe to call concurrently from multiple goroutines.
 func (s *Server) queryOneUpstream(upstream string, rawQuery []byte, timeout time.Duration) ([]byte, error) {
+	response, err := s.queryOneUDPUpstream(upstream, rawQuery, timeout)
+	if err != nil || len(response) < 4 || response[2]&0x02 == 0 {
+		return response, err
+	}
+	s.dnsUpstreamTCPFallbacks.Add(1)
+	return queryOneTCPUpstream(upstream, rawQuery, timeout)
+}
+
+func (s *Server) queryOneUDPUpstream(upstream string, rawQuery []byte, timeout time.Duration) ([]byte, error) {
 	conn, err := newUDPUpstreamConn(upstream)
 	if err != nil {
 		return nil, err
@@ -413,6 +502,41 @@ func (s *Server) queryOneUpstream(upstream string, rawQuery []byte, timeout time
 	response := make([]byte, n)
 	copy(response, buffer[:n])
 	s.dnsUpstreamBufferPool.Put(buffer)
+	return response, nil
+}
+
+func queryOneTCPUpstream(upstream string, rawQuery []byte, timeout time.Duration) ([]byte, error) {
+	host, port, err := splitHostPortDefault53(upstream)
+	if err != nil || len(rawQuery) > 65535 {
+		return nil, ErrInvalidDNSUpstream
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	frame := make([]byte, 2+len(rawQuery))
+	binary.BigEndian.PutUint16(frame[:2], uint16(len(rawQuery)))
+	copy(frame[2:], rawQuery)
+	if _, err := conn.Write(frame); err != nil {
+		return nil, err
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		return nil, err
+	}
+	n := int(binary.BigEndian.Uint16(size[:]))
+	if n < 2 {
+		return nil, ErrInvalidDNSUpstream
+	}
+	response := make([]byte, n)
+	if _, err := io.ReadFull(conn, response); err != nil {
+		return nil, err
+	}
+	if len(rawQuery) >= 2 && (response[0] != rawQuery[0] || response[1] != rawQuery[1]) {
+		return nil, ErrInvalidDNSUpstream
+	}
 	return response, nil
 }
 

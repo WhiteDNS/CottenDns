@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -35,6 +36,7 @@ func main() {
 	configPath := flag.String("config", "server_config.toml", "Path to server configuration file")
 	logPath := flag.String("log", "", "Path to log file (optional)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	metricsAddress := flag.String("metrics-address", "", "Optional HTTP health/Prometheus listen address (for example 127.0.0.1:9090)")
 	configFlags, err := config.NewServerConfigFlagBinder(flag.CommandLine)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Server flag setup failed: %v\n", err)
@@ -110,6 +112,21 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if *metricsAddress != "" {
+		listener, listenErr := net.Listen("tcp", *metricsAddress)
+		if listenErr != nil {
+			log.Errorf("Metrics listener setup failed: %v", listenErr)
+			os.Exit(1)
+		}
+		log.Infof("Metrics and health listener ready: <cyan>%s</cyan>", listener.Addr())
+		go func() {
+			if serveErr := srv.ServeMetrics(ctx, listener); serveErr != nil && ctx.Err() == nil {
+				log.Errorf("Metrics listener stopped unexpectedly: %v", serveErr)
+				stop()
+			}
+		}()
+	}
 
 	log.Infof("\U0001F680 <green>Server Configuration Loaded</green>")
 	if len(cfg.Domain) > 0 {

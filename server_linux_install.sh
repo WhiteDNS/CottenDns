@@ -156,6 +156,9 @@ Options:
   -u, --uninstall           Uninstall CottenDns: stop and remove the systemd
                             service, drop kernel/limit tunings, and clean up
                             binaries and config files in the install directory.
+      --upgrade             Upgrade an existing systemd installation in place.
+                            Preserves config/key and rolls the unit back if the
+                            new process does not become healthy.
   -h, --help                Show this help message and exit.
 
 Examples:
@@ -164,6 +167,9 @@ Examples:
 
   # Install a specific release version:
   bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version v1.2.3
+
+  # Upgrade an existing server in one command:
+  bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --upgrade
 
   # Local/offline install for testing:
   python build.py
@@ -190,6 +196,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -u|--uninstall)
       ACTION="uninstall"
+      shift
+      ;;
+    --upgrade)
+      ACTION="upgrade"
       shift
       ;;
     -l|--local)
@@ -222,6 +232,11 @@ if [[ "$ACTION" == "uninstall" && -n "$TARGET_VERSION" ]]; then
   exit 2
 fi
 
+if [[ "$ACTION" == "upgrade" && "$LOCAL_MODE" -eq 1 ]]; then
+  echo "Error: --upgrade cannot be combined with --local" >&2
+  exit 2
+fi
+
 if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^[A-Za-z0-9._+-]+$ ]]; then
   echo "Error: invalid version tag: $TARGET_VERSION" >&2
   exit 2
@@ -236,6 +251,15 @@ INSTALL_DIR="$(pwd -P)"
 if [[ "$INSTALL_DIR" == /dev/fd* || "$INSTALL_DIR" == /proc/*/fd* ]]; then
   INSTALL_DIR="$(pwd -P)"
 fi
+if [[ "$ACTION" == "upgrade" ]]; then
+  EXISTING_SERVICE_FILE="$(systemctl show cottendns.service --property FragmentPath --value 2>/dev/null || true)"
+  [[ -f "$EXISTING_SERVICE_FILE" ]] || log_error "No existing cottendns systemd installation was found."
+  EXISTING_EXECUTABLE="$(sed -n 's|^ExecStart=\([^[:space:]]*\).*|\1|p' "$EXISTING_SERVICE_FILE" | head -n1)"
+  [[ -n "$EXISTING_EXECUTABLE" ]] || log_error "Could not determine the existing server path from cottendns.service."
+  INSTALL_DIR="$(dirname "$EXISTING_EXECUTABLE")"
+  [[ -f "$INSTALL_DIR/server_config.toml" ]] || log_error "Existing server config not found at $INSTALL_DIR/server_config.toml."
+  [[ -f "$EXISTING_EXECUTABLE" ]] || log_error "Existing executable not found at $EXISTING_EXECUTABLE."
+fi
 log_info "Installation directory: $INSTALL_DIR"
 cd "$INSTALL_DIR" || log_error "Cannot access install directory: $INSTALL_DIR"
 
@@ -249,6 +273,8 @@ fi
 echo -e "${MAGENTA}${BOLD}"
 if [[ "$ACTION" == "uninstall" ]]; then
   echo -e "          CottenDns Server Auto-Uninstaller${NC}"
+elif [[ "$ACTION" == "upgrade" ]]; then
+  echo -e "          CottenDns Server Safe Upgrader${NC}"
 elif [[ "$LOCAL_MODE" -eq 1 ]]; then
   echo -e "          CottenDns Server Local-Installer${NC}"
 else
@@ -382,8 +408,9 @@ if [[ "$ACTION" == "uninstall" ]]; then
   exit 0
 fi
 
-if [[ -f "server_config.toml" && -f "server_config.toml.backup" ]]; then
-  log_error "Both server_config.toml and server_config.toml.backup exist. Remove one and retry."
+if [[ -f "server_config.toml.backup" ]]; then
+  mv -f server_config.toml.backup "server_config.toml.backup.$(date +%Y%m%d_%H%M%S)"
+  log_warn "Moved a stale config backup aside before continuing."
 fi
 
 TMP_LOG="init_logs.tmp"
@@ -393,8 +420,17 @@ cleanup() {
   if [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]]; then
     rm -rf "$DOWNLOAD_DIR" 2>/dev/null || true
   fi
+  if [[ "$ACTION" == "upgrade" && "${UPGRADE_COMPLETED:-false}" != true ]]; then
+    if [[ -f "$INSTALL_DIR/server_config.toml.backup" ]]; then
+      [[ -f "$INSTALL_DIR/server_config.toml" ]] && mv -f "$INSTALL_DIR/server_config.toml" "$INSTALL_DIR/server_config.toml.failed-upgrade"
+      mv -f "$INSTALL_DIR/server_config.toml.backup" "$INSTALL_DIR/server_config.toml"
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl restart cottendns >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
+UPGRADE_COMPLETED=false
 
 PM=""
 if command -v apt-get >/dev/null 2>&1; then PM="apt";
@@ -821,30 +857,16 @@ else
   chmod +x "$EXECUTABLE"
 fi
 
+[[ -x "$EXECUTABLE" ]] || log_error "Downloaded server binary is not executable: $EXECUTABLE"
+./"$EXECUTABLE" --version >/dev/null 2>&1 || log_error "Downloaded server binary failed its version check. Existing service was not changed."
+
 log_header "Configuration"
 [[ -f "server_config.toml" ]] || log_error "server_config.toml not found."
-CURRENT_VERSION="$(extract_config_version server_config.toml)"
-if [[ -z "${CURRENT_VERSION:-}" ]]; then
-  log_error "server_config.toml is invalid (CONFIG_VERSION missing)."
-fi
 if [[ -f "server_config.toml.backup" ]]; then
-  BACKUP_VERSION="$(extract_config_version server_config.toml.backup)"
-  if [[ -z "${BACKUP_VERSION:-}" ]]; then
-    log_error "Backup config is too old (CONFIG_VERSION missing). Merge manually."
-  fi
-
-  if [[ "$BACKUP_VERSION" == "$CURRENT_VERSION" ]]; then
-    mv -f server_config.toml.backup server_config.toml
-    log_info "Config restored from backup."
-  elif version_lt "$BACKUP_VERSION" "$CURRENT_VERSION"; then
-    OLD_CFG_NAME="server_config_$(date +%Y%m%d_%H%M%S).toml"
-    mv -f server_config.toml.backup "$OLD_CFG_NAME"
-    log_warn "Old config version detected (backup=$BACKUP_VERSION < new=$CURRENT_VERSION)."
-    log_warn "Previous config renamed to: $OLD_CFG_NAME"
-    log_info "Using fresh config template; please set DOMAIN and other required fields."
-  else
-    log_error "Backup config version is newer than the config template (backup=$BACKUP_VERSION, new=$CURRENT_VERSION). Merge manually."
-  fi
+	NEW_TEMPLATE="server_config.toml.dist"
+	mv -f server_config.toml "$NEW_TEMPLATE"
+	mv -f server_config.toml.backup server_config.toml
+	log_success "Existing config preserved; new defaults are available in $NEW_TEMPLATE."
 fi
 
 if [[ -f "server_config.toml" ]] && grep -q '"v.domain.com"' server_config.toml; then
@@ -880,42 +902,30 @@ echo -e "${GREEN}${BOLD}------------------------------------------------------"
 echo -e "  YOUR ENCRYPTION KEY: ${NC}${CYAN}$(cat encrypt_key.txt 2>/dev/null)${NC}"
 echo -e "${GREEN}${BOLD}------------------------------------------------------${NC}"
 
-log_header "Installing Egress Filter (Block Outbound TCP/53)"
-cat > /usr/local/sbin/cottendns-egress-filter.sh <<'FILTER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if command -v iptables >/dev/null 2>&1; then
-  iptables -C OUTPUT -p tcp --dport 53 -j REJECT --reject-with tcp-reset 2>/dev/null || \
-  iptables -I OUTPUT 1 -p tcp --dport 53 -j REJECT --reject-with tcp-reset
-fi
-
-if command -v ip6tables >/dev/null 2>&1; then
-  ip6tables -C OUTPUT -p tcp --dport 53 -j REJECT --reject-with tcp-reset 2>/dev/null || \
-  ip6tables -I OUTPUT 1 -p tcp --dport 53 -j REJECT --reject-with tcp-reset || true
-fi
-FILTER
-chmod +x /usr/local/sbin/cottendns-egress-filter.sh
-
-cat > /etc/systemd/system/cottendns-egress-filter.service <<'SERVICE'
-[Unit]
-Description=CottenDns egress filter - reject outbound TCP/53
-After=network.target
-Before=cottendns.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/cottendns-egress-filter.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-log_success "Egress filter installed."
+log_header "Removing Legacy TCP/53 Egress Block"
+# Older installers blocked every outbound TCP DNS request. That also blocked
+# standards-compliant TCP fallback when an upstream UDP response was truncated.
+systemctl disable --now cottendns-egress-filter.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/cottendns-egress-filter.service /usr/local/sbin/cottendns-egress-filter.sh
+for firewall_tool in iptables ip6tables; do
+  if command -v "$firewall_tool" >/dev/null 2>&1; then
+    while "$firewall_tool" -C OUTPUT -p tcp --dport 53 -j REJECT --reject-with tcp-reset 2>/dev/null; do
+      "$firewall_tool" -D OUTPUT -p tcp --dport 53 -j REJECT --reject-with tcp-reset || break
+    done
+  fi
+done
+log_success "Outbound TCP DNS is available for upstream fallback."
 
 log_header "Installing System Service"
 SVC="/etc/systemd/system/cottendns.service"
+SVC_BACKUP=""
+SVC_WAS_CREATED=false
+if [[ "$ACTION" == "upgrade" && -f "$SVC" ]]; then
+  SVC_BACKUP="${SVC}.upgrade-backup"
+  cp -a "$SVC" "$SVC_BACKUP"
+elif [[ "$ACTION" == "upgrade" ]]; then
+  SVC_WAS_CREATED=true
+fi
 cat > "$SVC" <<EOF
 [Unit]
 Description=CottenDns Server
@@ -926,7 +936,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/$EXECUTABLE
+ExecStart=$INSTALL_DIR/$EXECUTABLE -config $INSTALL_DIR/server_config.toml -metrics-address 127.0.0.1:9090
 Restart=always
 RestartSec=3
 User=root
@@ -943,34 +953,40 @@ EOF
 
 systemctl daemon-reload
 
-mkdir -p /etc/systemd/system/cottendns.service.d
-
-cat > /etc/systemd/system/cottendns.service.d/10-cottendns-tuning.conf <<'DROPIN'
-[Unit]
-Wants=cottendns-egress-filter.service
-After=cottendns-egress-filter.service
-DROPIN
-
+rm -rf /etc/systemd/system/cottendns.service.d
 systemctl daemon-reload
-systemctl enable --now cottendns-egress-filter.service
-
-log_success "Egress filter enabled."
-
-log_info "Killing any stuck outbound TCP/53 sockets..."
-ss -K state syn-sent dport = :53 >/dev/null 2>&1 || true
-ss -K state close-wait dport = :53 >/dev/null 2>&1 || true
-ss -6 -K state syn-sent dport = :53 >/dev/null 2>&1 || true
-ss -6 -K state close-wait dport = :53 >/dev/null 2>&1 || true
 
 systemctl enable cottendns >/dev/null 2>&1
 systemctl restart cottendns
 
-if ! systemctl is-active --quiet cottendns; then
-  journalctl -u cottendns -n 50 --no-pager || true
-  log_error "Service failed to start. See logs above."
-fi
+HEALTHY=false
+for _ in {1..30}; do
+  if systemctl is-active --quiet cottendns && curl -fsS --max-time 2 http://127.0.0.1:9090/healthz >/dev/null 2>&1; then
+    HEALTHY=true
+    break
+  fi
+  sleep 1
+done
 
-log_success "CottenDns service is running."
+if [[ "$HEALTHY" != true ]]; then
+  journalctl -u cottendns -n 50 --no-pager || true
+  if [[ -n "$SVC_BACKUP" && -f "$SVC_BACKUP" ]]; then
+    log_warn "New service failed its health check; restoring the previous service unit."
+    mv -f "$SVC_BACKUP" "$SVC"
+    systemctl daemon-reload
+    systemctl restart cottendns || true
+  elif [[ "$SVC_WAS_CREATED" == true ]]; then
+    log_warn "Removing the failed override unit and returning to the previous packaged unit."
+    rm -f "$SVC"
+    systemctl daemon-reload
+    systemctl restart cottendns || true
+  fi
+  log_error "Service failed to become healthy. The previous unit was restored when available."
+fi
+rm -f "$SVC_BACKUP" 2>/dev/null || true
+
+log_success "CottenDns service is running and healthy."
+UPGRADE_COMPLETED=true
 
 log_info "Cleaning up old server binaries..."
 shopt -s nullglob
@@ -989,6 +1005,8 @@ echo -e "  ${YELLOW}>${NC} Start:   systemctl start cottendns"
 echo -e "  ${YELLOW}>${NC} Stop:    systemctl stop cottendns"
 echo -e "  ${YELLOW}>${NC} Restart: systemctl restart cottendns"
 echo -e "  ${YELLOW}>${NC} Logs:    journalctl -u cottendns -f"
+echo -e "  ${YELLOW}>${NC} Health:  curl http://127.0.0.1:9090/healthz"
+echo -e "  ${YELLOW}>${NC} Upgrade: bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --upgrade"
 echo -e "\n${BOLD}Files:${NC}"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/server_config.toml"
 echo -e "  ${YELLOW}>${NC} ${INSTALL_DIR}/encrypt_key.txt"

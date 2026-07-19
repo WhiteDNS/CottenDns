@@ -235,7 +235,7 @@ The installer:
 | ⚙️ Tuning | Applies UDP, socket buffer, file descriptor, and systemd limits |
 | 🔑 Key | Starts the server once to generate `encrypt_key.txt` |
 | 🧰 Service | Installs and starts the `cottendns` systemd service |
-| 🧱 Egress filter | Rejects outbound TCP/53 to avoid incorrect TCP DNS behavior |
+| 📊 Health | Exposes local health and Prometheus metrics on `127.0.0.1:9090` |
 
 Installer options:
 
@@ -243,6 +243,7 @@ Installer options:
 | --- | --- |
 | `--version <TAG>` | Install a specific release tag instead of latest |
 | `--local` | Use a local server binary/config from the current directory or `dist/` |
+| `--upgrade` | Upgrade the detected systemd installation in place, preserving config/key with automatic unit rollback |
 | `--uninstall` | Remove the service, tuning files, binary, config, and key from the install directory |
 | `--help` | Show installer usage |
 
@@ -250,6 +251,7 @@ Examples:
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
+bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --upgrade
 sudo bash server_linux_install.sh --local
 bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
 ```
@@ -261,6 +263,23 @@ systemctl status cottendns
 journalctl -u cottendns -f
 systemctl restart cottendns
 systemctl stop cottendns
+curl http://127.0.0.1:9090/healthz
+```
+
+### Docker installation
+
+Docker Engine with the Compose plugin can install the server without changing
+host packages. Linux host networking avoids an extra NAT layer on UDP/TCP 53.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_docker_install.sh | sudo sh -s -- --domain vpn.example.com
+```
+
+Upgrade later with one command. The persistent config and encryption key under
+`/opt/cottendns-docker/data` are retained:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_docker_install.sh | sudo sh -s -- --upgrade
 ```
 
 The deployed `server_config.toml` ships with these optional knobs (all safe defaults; edit and `systemctl restart cottendns` to apply):
