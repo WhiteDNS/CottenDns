@@ -130,7 +130,7 @@ v.example.com   NS  ns.example.com
 ### 2. Install Server
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash
 ```
 
 After startup, the server prints the active encryption key and writes it to `encrypt_key.txt`.
@@ -221,7 +221,7 @@ Short labels matter. A shorter domain leaves more room for payload inside the DN
 Run on the remote Linux server:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash
 ```
 
 The installer:
@@ -250,10 +250,11 @@ Installer options:
 Examples:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --upgrade
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash -s -- --version vYYYY.MM.DD.HHMMSS-abcdef0
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash -s -- --upgrade
 sudo bash server_linux_install.sh --local
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_linux_install.sh | sudo bash -s -- --uninstall
 ```
 
 Useful service commands:
@@ -272,14 +273,14 @@ Docker Engine with the Compose plugin can install the server without changing
 host packages. Linux host networking avoids an extra NAT layer on UDP/TCP 53.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_docker_install.sh | sudo sh -s -- --domain vpn.example.com
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_docker_install.sh | sudo sh -s -- --domain vpn.example.com
 ```
 
 Upgrade later with one command. The persistent config and encryption key under
 `/opt/cottendns-docker/data` are retained:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_docker_install.sh | sudo sh -s -- --upgrade
+curl -fsSL https://raw.githubusercontent.com/TaJirax/cottenDNS/main/server_docker_install.sh | sudo sh -s -- --upgrade
 ```
 
 The deployed `server_config.toml` ships with these optional knobs (all safe defaults; edit and `systemctl restart cottendns` to apply):
