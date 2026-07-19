@@ -714,6 +714,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: release_assets
+          pattern: build-artifacts-*
 
       - name: List downloaded artifacts
         run: |
