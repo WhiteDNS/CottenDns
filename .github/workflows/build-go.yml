@@ -687,6 +687,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve repository-owned container name
+        id: container
+        shell: bash
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cottendns-server" >> "$GITHUB_OUTPUT"
       - name: Build and publish multi-architecture server image
         uses: docker/build-push-action@v6
         with:
@@ -695,8 +700,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: BUILD_VERSION=${{ needs.preflight.outputs.release_tag }}
           tags: |
-            ghcr.io/tajirax/cottendns-server:latest
-            ghcr.io/tajirax/cottendns-server:${{ needs.preflight.outputs.release_tag }}
+            ${{ steps.container.outputs.image }}:latest
+            ${{ steps.container.outputs.image }}:${{ needs.preflight.outputs.release_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
