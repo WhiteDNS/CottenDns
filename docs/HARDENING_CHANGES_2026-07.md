@@ -119,7 +119,8 @@ and ceiling (defaults 0.75 / 0.85). The parity policy is now banded:
 
 | Measured download loss | Parity policy |
 |---|---|
-| `< FEC_AUTO_LOSS_THRESHOLD` | Relax toward base parity (FEC may stay on but cheap) |
+| `< FEC_AUTO_LOSS_THRESHOLD` for 1–2 windows | Relax toward base parity as anti-flap hysteresis |
+| `< FEC_AUTO_LOSS_THRESHOLD` for 3 consecutive windows | Fully disengage FEC; raw ARQ with zero parity/encoding overhead |
 | `threshold … FEC_SUPER_LOSS_FLOOR` | Normal `ParityForLoss` scaling, clamped to `FEC_AUTO_MAX_PARITY` |
 | `FEC_SUPER_LOSS_FLOOR … FEC_SUPER_LOSS_CEIL` | **Super-FEC:** parity scaled to the *measured* loss, lifted above the auto ceiling up to `FEC_SUPER_MAX_PARITY` |
 | `> FEC_SUPER_LOSS_CEIL` | **Drop, don't rebuild:** stop escalating, relax to base parity, leave the block to ARQ |

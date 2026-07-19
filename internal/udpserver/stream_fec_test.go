@@ -16,10 +16,12 @@ package udpserver
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	Enums "cottendns-go/internal/enums"
 	"cottendns-go/internal/fec"
+	"cottendns-go/internal/mlq"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
@@ -57,6 +59,127 @@ func TestStreamServerAutoFECStaysOffOnLowLoss(t *testing.T) {
 
 	if s.FECEnabled() {
 		t.Fatal("auto FEC should stay off under low loss")
+	}
+}
+
+func TestStreamServerAutoFECDisengagesAfterSustainedLowLoss(t *testing.T) {
+	s := &Stream_server{ID: 3}
+	s.ConfigureAutoFEC(4, 2, 16, 0.3)
+	driveLossWindow(s, 0.40)
+	if !s.FECEnabled() {
+		t.Fatal("auto FEC should engage after a high-loss window")
+	}
+
+	// Leave both a partial encoder block and completed shards queued. A clean
+	// disengage must discard both; ARQ will retransmit any unacknowledged source
+	// sequences as ordinary packets after FEC is inactive.
+	s.feedFECData(1, 0, []byte("partial"))
+	for seq := uint16(2); seq <= 5; seq++ {
+		s.feedFECData(seq, 0, []byte("queued"))
+	}
+
+	for window := 1; window < fecDisengageWindows; window++ {
+		driveLossWindow(s, 0)
+		if !s.FECEnabled() {
+			t.Fatalf("auto FEC disengaged before hysteresis completed at window %d", window)
+		}
+	}
+	driveLossWindow(s, 0)
+	if s.FECEnabled() {
+		t.Fatal("auto FEC should fully disengage after sustained low loss")
+	}
+	if s.HasBufferedFECWork() {
+		t.Fatal("disengaged auto FEC must not retain encoder work")
+	}
+	if _, ok := s.popFECShard(); ok {
+		t.Fatal("disengaged auto FEC must discard queued recovery shards")
+	}
+}
+
+func TestStreamServerAutoFECReengagesWithoutReplacingEncoder(t *testing.T) {
+	s := &Stream_server{ID: 4}
+	s.ConfigureAutoFEC(4, 2, 16, 0.3)
+	driveLossWindow(s, 0.40)
+	encoder := s.fecEnc
+	for range fecDisengageWindows {
+		driveLossWindow(s, 0)
+	}
+	if s.FECEnabled() {
+		t.Fatal("expected auto FEC to be inactive after clean windows")
+	}
+
+	driveLossWindow(s, 0.40)
+	if !s.FECEnabled() {
+		t.Fatal("auto FEC should re-engage when loss returns")
+	}
+	if s.fecEnc != encoder {
+		t.Fatal("auto FEC must reuse its encoder so block IDs remain monotonic")
+	}
+}
+
+func TestStreamServerExplicitFECRemainsActive(t *testing.T) {
+	s := &Stream_server{ID: 5}
+	s.EnableFEC(4, 2)
+	if !s.FECEnabled() {
+		t.Fatal("explicit FEC must remain active")
+	}
+	s.feedFECData(1, 0, []byte("payload"))
+	if !s.HasBufferedFECWork() {
+		t.Fatal("explicit FEC should buffer source data below a block boundary")
+	}
+}
+
+func TestFECDequeueFallsBackToRawWhenAutoFECDisengages(t *testing.T) {
+	stream := &Stream_server{
+		ID:      6,
+		TXQueue: mlq.New[*serverStreamTXPacket](4),
+		fecEnc:  fec.NewEncoder(4, 2),
+		// Model the race where the caller observed active=true, but the clean
+		// window disengaged FEC before fecDequeueFromStream reached feedFECData.
+		fecActive: false,
+	}
+	payload := []byte("send-me-raw")
+	if !stream.PushTXPacket(Enums.DefaultPacketPriority(Enums.PACKET_STREAM_DATA), Enums.PACKET_STREAM_DATA, 9, 0, 0, 0, 0, payload) {
+		t.Fatal("failed to queue source packet")
+	}
+
+	packet, ok := (&Server{}).fecDequeueFromStream(stream, int32(stream.ID))
+	if !ok || packet == nil {
+		t.Fatal("dequeue must return the source packet when FEC no longer accepts it")
+	}
+	defer putTXPacketToPool(packet)
+	if packet.PacketType != Enums.PACKET_STREAM_DATA || packet.SequenceNum != 9 || string(packet.Payload) != string(payload) {
+		t.Fatalf("unexpected raw fallback packet: type=%d seq=%d payload=%q", packet.PacketType, packet.SequenceNum, packet.Payload)
+	}
+}
+
+func TestConcurrentFECWindowCloseCountsOneCleanWindow(t *testing.T) {
+	s := &Stream_server{
+		ID:        7,
+		fecEnc:    fec.NewEncoder(4, 2),
+		fecActive: true,
+	}
+	s.ConfigureAutoFEC(4, 2, 16, 0.3)
+
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(fecAutoWindow + 1)
+	for range fecAutoWindow + 1 {
+		go func() {
+			defer workers.Done()
+			<-start
+			s.recordFECSample(Enums.PACKET_STREAM_DATA)
+		}()
+	}
+	close(start)
+	workers.Wait()
+
+	s.fecMu.Lock()
+	lowWindows := s.fecLowWindows
+	active := s.fecActive
+	s.fecMu.Unlock()
+	if !active || lowWindows != 1 {
+		t.Fatalf("concurrent threshold crossing must close exactly one clean window: active=%v lowWindows=%d", active, lowWindows)
 	}
 }
 

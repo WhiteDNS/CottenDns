@@ -25,13 +25,14 @@ import (
 
 const (
 	// ShardHeaderSize is the per-shard framing overhead on the wire.
-	ShardHeaderSize = 9
+	ShardHeaderSize  = 9
 	maxTrackedBlocks = 64 // decoder LRU bound
 )
 
 var (
-	ErrShortShardPacket = errors.New("fec: shard packet shorter than header")
-	ErrBadShardFrame    = errors.New("fec: shard frame inconsistent with header")
+	ErrShortShardPacket   = errors.New("fec: shard packet shorter than header")
+	ErrBadShardFrame      = errors.New("fec: shard frame inconsistent with header")
+	ErrShardBlockMismatch = errors.New("fec: shard metadata does not match its block")
 )
 
 // FrameShard serializes one block shard into a wire packet.
@@ -90,8 +91,14 @@ func NewEncoder(blockSize, parity int) *Encoder {
 	if blockSize < 1 {
 		blockSize = 1
 	}
+	if blockSize >= maxShards {
+		blockSize = maxShards - 1
+	}
 	if parity < 1 {
 		parity = 1
+	}
+	if blockSize+parity > maxShards {
+		parity = maxShards - blockSize
 	}
 	return &Encoder{blockSize: blockSize, parity: parity}
 }
@@ -196,6 +203,10 @@ func (d *Decoder) AddShard(packet []byte) ([][]byte, error) {
 		d.blocks[f.blockID] = b
 		d.order = append(d.order, f.blockID)
 		d.evictLocked()
+	} else if b.dataShards != f.dataShards ||
+		b.parityShards != f.parityShards ||
+		b.shardSize != len(f.shard) {
+		return nil, ErrShardBlockMismatch
 	}
 	if b.done || f.shardIndex >= len(b.shards) || b.shards[f.shardIndex] != nil {
 		return nil, nil

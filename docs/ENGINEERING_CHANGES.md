@@ -129,10 +129,13 @@ loss ≈ retransmits / (originals + retransmits)   (per window, per stream)
 
 When loss crosses `FEC_AUTO_LOSS_THRESHOLD`, the stream turns FEC on with parity
 = `ParityForLoss(block, loss)`, clamped to `[FEC_PARITY, FEC_AUTO_MAX_PARITY]`.
-It is **enable-and-scale only**: once on it stays on for the life of the stream
-(parity relaxes toward the base as loss subsides) so block numbering is never
-reset mid-flight and the client decoder never sees a reused block ID. Below the
-threshold there is **zero FEC overhead**.
+One or two clean windows relax parity toward the base without flapping. After
+three consecutive below-threshold windows, FEC fully disengages and the stream
+returns to raw ARQ packets with **zero FEC bandwidth or Reed-Solomon CPU
+overhead**. The encoder object is retained only to keep block IDs monotonic if
+loss later re-engages FEC; its partial block and queued shards are discarded,
+and ARQ remains the delivery backstop. A dequeue/disengage race sends the packet
+raw immediately instead of waiting for its retransmission timer.
 
 **Config.** `FEC_AUTO_ENABLED` (default true), `FEC_AUTO_LOSS_THRESHOLD` (0.3),
 `FEC_AUTO_MAX_PARITY` (0 → auto-caps at 4× block). `FEC_DOWNLOAD_ENABLED`

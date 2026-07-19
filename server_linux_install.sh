@@ -17,6 +17,44 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[DONE]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+restore_existing_config() {
+  local install_dir="$1"
+  local config="$install_dir/server_config.toml"
+  local backup="$install_dir/server_config.toml.backup"
+  local template="$install_dir/server_config.toml.dist"
+
+  if [[ -f "$backup" ]]; then
+    mv -f "$config" "$template"
+    mv -f "$backup" "$config"
+    log_success "Existing config preserved; new defaults are available in $template."
+  fi
+}
+
+# CI exercises the same config-swap helper used by a real --upgrade without
+# requiring root or systemd. This protects the promise that old deployments keep
+# both their config and encryption key when the latest defaults are installed.
+run_upgrade_contract_self_test() {
+  local fixture
+  fixture="$(mktemp -d)"
+  [[ -n "$fixture" && -d "$fixture" ]] || log_error "Could not create upgrade test fixture."
+
+  printf '%s\n' 'CONFIG_VERSION = "legacy"' > "$fixture/server_config.toml.backup"
+  printf '%s\n' 'CONFIG_VERSION = "current"' > "$fixture/server_config.toml"
+  printf '%s\n' 'unchanged-key' > "$fixture/encrypt_key.txt"
+  restore_existing_config "$fixture"
+
+  grep -q 'legacy' "$fixture/server_config.toml" || log_error "Upgrade test replaced the legacy config."
+  grep -q 'current' "$fixture/server_config.toml.dist" || log_error "Upgrade test did not retain the new defaults."
+  grep -qx 'unchanged-key' "$fixture/encrypt_key.txt" || log_error "Upgrade test changed the encryption key."
+  rm -rf -- "$fixture"
+  log_success "Legacy upgrade contract passed."
+}
+
+if [[ "${COTTENDNS_INSTALLER_SELF_TEST:-0}" == "1" ]]; then
+  run_upgrade_contract_self_test
+  exit 0
+fi
 require_cmd() { command -v "$1" >/dev/null 2>&1 || log_error "Missing command: $1"; }
 backup_file_once() {
   local f="$1"
@@ -862,12 +900,7 @@ fi
 
 log_header "Configuration"
 [[ -f "server_config.toml" ]] || log_error "server_config.toml not found."
-if [[ -f "server_config.toml.backup" ]]; then
-	NEW_TEMPLATE="server_config.toml.dist"
-	mv -f server_config.toml "$NEW_TEMPLATE"
-	mv -f server_config.toml.backup server_config.toml
-	log_success "Existing config preserved; new defaults are available in $NEW_TEMPLATE."
-fi
+restore_existing_config "$INSTALL_DIR"
 
 if [[ -f "server_config.toml" ]] && grep -q '"v.domain.com"' server_config.toml; then
   echo -e "${YELLOW}${BOLD}Attention:${NC} Set your NS domain."

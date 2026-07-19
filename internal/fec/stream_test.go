@@ -9,6 +9,7 @@ package fec
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -30,6 +31,28 @@ func TestEncoderEmitsBlockWhenFull(t *testing.T) {
 	}
 	if len(frames) != 4+12 {
 		t.Fatalf("expected 16 shard frames, got %d", len(frames))
+	}
+}
+
+func TestEncoderClampsShardCountsAtWireLimit(t *testing.T) {
+	enc := NewEncoder(maxShards+100, maxShards+100)
+	if enc.blockSize != maxShards-1 || enc.parity != 1 {
+		t.Fatalf("unexpected clamped encoder dimensions: data=%d parity=%d", enc.blockSize, enc.parity)
+	}
+	enc.SetParity(maxShards + 100)
+	if enc.parity != 1 {
+		t.Fatalf("parity must remain within the wire limit, got %d", enc.parity)
+	}
+}
+
+func TestDecoderRejectsMetadataChangesWithinBlock(t *testing.T) {
+	dec := NewDecoder()
+	if out, err := dec.AddShard(FrameShard(7, 0, 2, 2, []byte("abc"))); err != nil || out != nil {
+		t.Fatalf("first shard failed: out=%v err=%v", out, err)
+	}
+	_, err := dec.AddShard(FrameShard(7, 1, 3, 2, []byte("abc")))
+	if !errors.Is(err, ErrShardBlockMismatch) {
+		t.Fatalf("expected block metadata mismatch, got %v", err)
 	}
 }
 

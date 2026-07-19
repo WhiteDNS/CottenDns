@@ -44,7 +44,7 @@ Recent work focused on staying usable on highly restrictive, lossy networks:
 - **QNAME reshaping.** `QNAME_LABEL_LENGTH` lays the payload into shorter, jittered DNS labels instead of one chain of uniform 63-char labels — a lower-fingerprint knob. Server-transparent (the server reassembles labels regardless), so it can't desync; default keeps maximal capacity.
 - **Adaptive per-group MTU.** Instead of forcing the slowest resolver's MTU on everyone, the client runs the session at the throughput-optimal operating point — the MTU that maximizes `MTU × resolvers that sustain it`, jointly over upload and download. Slower resolvers are kept as **reserves** and promoted automatically (with hysteresis) if the active pool degrades.
 - **Three explicit resolver states.** MTU testing flags every resolver as **active**, **reserve** (backup/failover), or **invalid**, with a clear `[RESOLVER STATES]` summary in the logs.
-- **Loss-triggered FEC.** Download-path Reed-Solomon FEC can turn on automatically per stream once measured loss crosses a threshold, scaling parity to the loss (zero overhead while the link is healthy) — built for very high-loss conditions.
+- **Loss-triggered FEC.** Download-path Reed-Solomon FEC turns on automatically per stream once measured loss crosses a threshold, scales parity to the loss, and fully disengages after sustained recovery (zero overhead while the link is healthy) — built for very high-loss conditions.
 - **More transport channels, accepted by default.** Tunnel responses can ride over **NULL** and **HTTPS/SVCB** records in addition to TXT/CNAME/A; the server auto-accepts whichever query type the client rotates to.
 - **MTU-weighted balancing.** A strategy that sends each resolver traffic in proportion to its download MTU.
 - **Safer caching & bigger session space.** Log-based fast-start is hybrid (cached resolvers trusted, new/changed ones always re-scanned), and the session ID space was widened to 65535.
@@ -292,7 +292,7 @@ The deployed `server_config.toml` ships with these optional knobs (all safe defa
 | `TCP_MAX_QUERIES_PER_CONN` | `0` | Optional per-connection query cap; `0` means unlimited persistent TCP |
 | `ENCRYPTION_AUTO_DETECT` | `true` | Accept whichever encryption method the client uses (trial-decrypt) without reconfiguring the server |
 | `A_RECORD_DATA_DELIVERY` | `false` | Answer `A`-type tunnel queries with IPv4 A-record data (supplementary channel) |
-| `FEC_AUTO_ENABLED` | `true` | Turn download FEC on automatically once a stream shows loss |
+| `FEC_AUTO_ENABLED` | `true` | Engage download FEC when a stream shows loss; fully disengage after three sustained clean windows |
 | `FEC_DOWNLOAD_ENABLED` | `false` | Reed-Solomon FEC on the download path for high-loss links; pair with `FEC_BLOCK_SIZE`/`FEC_PARITY` (e.g. `4`/`12` to ride out ~75% loss) |
 
 NULL and HTTPS/SVCB response channels need no server config — the server auto-accepts every query type the client rotates over (`QUERY_TYPES`) and answers with the matching record.

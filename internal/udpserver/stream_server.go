@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -54,19 +54,29 @@ type Stream_server struct {
 	fecMu         sync.Mutex
 	fecEnc        *fec.Encoder
 	fecShardQueue [][]byte
+	// fecActive gates whether *new* download data is actually diverted through
+	// the encoder. The encoder object is kept alive once created so its block
+	// numbering stays monotonic across a disengage/re-engage cycle (a reset
+	// blockID could collide with a still-tracked block on the client decoder);
+	// while fecActive is false the stream sends raw packets at zero FEC overhead.
+	// fecLowWindows counts consecutive sub-threshold loss windows for the
+	// disengage hysteresis. Both are guarded by fecMu.
+	fecActive     bool
+	fecLowWindows int
 
 	// Loss-triggered FEC (tier-2 auto activation). When fecAuto is set, the
 	// stream measures its own download loss from the retransmit rate over a
 	// sliding window and turns FEC on (and scales parity) once loss crosses
-	// fecAutoThreshold. Enable-and-scale only: once on it stays on for the life
-	// of the stream (parity relaxes toward fecAutoBaseParity as loss subsides),
-	// so block numbering is never reset mid-flight. Auto params are guarded by
-	// fecMu; the window counters are atomic.
-	fecAuto          atomic.Bool
-	fecAutoBlock     int
+	// fecAutoThreshold. It engages on loss and, once the link stays clean for
+	// fecDisengageWindows windows, fully disengages back to raw packets so a
+	// long-lived stream that saw one loss spike does not pay parity overhead for
+	// the rest of its life. Auto params are guarded by fecMu; window counters are
+	// atomic.
+	fecAuto           atomic.Bool
+	fecAutoBlock      int
 	fecAutoBaseParity int
-	fecAutoMaxParity int
-	fecAutoThreshold float64
+	fecAutoMaxParity  int
+	fecAutoThreshold  float64
 	// Super-FEC: a last-ditch, loss-aware high-parity band for extreme loss. When
 	// enabled and measured loss enters [fecSuperLossFloor, fecSuperLossCeil], parity
 	// is scaled continuously to the *measured* loss (via fec.ParityForLoss), lifted
@@ -76,15 +86,22 @@ type Stream_server struct {
 	// so it does not burn CPU/bandwidth encoding giant Reed-Solomon blocks for
 	// traffic that will not arrive anyway (the block is dropped from FEC and left to
 	// ARQ). fecSuperMaxParity == 0 means the Reed-Solomon hard limit for the block.
-	fecSuperEnabled   bool
-	fecSuperLossFloor float64
-	fecSuperLossCeil  float64
-	fecSuperMaxParity int
-	fecWindowData    atomic.Uint64
-	fecWindowResends atomic.Uint64
+	fecSuperEnabled    bool
+	fecSuperLossFloor  float64
+	fecSuperLossCeil   float64
+	fecSuperMaxParity  int
+	fecWindowData      atomic.Uint64
+	fecWindowResends   atomic.Uint64
+	fecWindowAdjusting atomic.Bool
 }
 
 const fecAutoWindow = 64
+
+// fecDisengageWindows is how many consecutive sub-threshold loss windows an
+// active stream must see before it tears FEC back down to raw packets. The delay
+// is hysteresis: it stops FEC flapping on/off when loss hovers at the threshold,
+// while still returning a recovered link to zero FEC overhead.
+const fecDisengageWindows = 3
 
 func NewStreamServer(streamID uint16, sessionID uint16, arqConfig arq.Config, localConn io.ReadWriteCloser, mtu int, queueInitialCapacity int, logger arq.Logger) *Stream_server {
 	if queueInitialCapacity < 1 {
@@ -419,6 +436,9 @@ func (s *Stream_server) EnableFEC(blockSize, parity int) {
 	if s.fecEnc == nil {
 		s.fecEnc = fec.NewEncoder(blockSize, parity)
 	}
+	// Explicit FEC is always active. Auto-FEC uses the same gate but may later
+	// disengage it after sustained clean windows.
+	s.fecActive = true
 	s.fecMu.Unlock()
 }
 
@@ -476,17 +496,37 @@ func (s *Stream_server) recordFECSample(packetType uint8) {
 	switch packetType {
 	case Enums.PACKET_STREAM_DATA:
 		if s.fecWindowData.Add(1) >= fecAutoWindow {
-			s.maybeAdjustAutoFEC()
+			s.runPendingAutoFECAdjustments()
 		}
 	case Enums.PACKET_STREAM_RESEND:
 		s.fecWindowResends.Add(1)
 	}
 }
 
+// runPendingAutoFECAdjustments guarantees only one goroutine closes a loss
+// window at a time. Data and retransmit producers can enqueue concurrently; a
+// simple threshold check would otherwise let multiple callers swap tiny
+// follow-up windows and incorrectly count them as clean hysteresis windows.
+func (s *Stream_server) runPendingAutoFECAdjustments() {
+	if !s.fecWindowAdjusting.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.fecWindowAdjusting.Store(false)
+	for {
+		s.maybeAdjustAutoFEC()
+		s.fecWindowAdjusting.Store(false)
+		if s.fecWindowData.Load() < fecAutoWindow ||
+			!s.fecWindowAdjusting.CompareAndSwap(false, true) {
+			return
+		}
+	}
+}
+
 // maybeAdjustAutoFEC computes the loss over the just-closed window and, if it is
 // at or above the threshold, turns FEC on (or raises parity) scaled to the loss.
-// Below the threshold it relaxes an already-on encoder's parity toward the base
-// but never tears FEC down, so block numbering stays monotonic for the client.
+// Once the link stays below the threshold for fecDisengageWindows windows it
+// fully disengages FEC back to raw packets (zero overhead), keeping the encoder
+// object so block numbering stays monotonic for the client if FEC re-engages.
 func (s *Stream_server) maybeAdjustAutoFEC() {
 	s.fecMu.Lock()
 	defer s.fecMu.Unlock()
@@ -499,8 +539,30 @@ func (s *Stream_server) maybeAdjustAutoFEC() {
 	loss := float64(resends) / float64(data+resends)
 
 	if loss < s.fecAutoThreshold {
+		if !s.fecActive {
+			return // already at zero overhead — nothing to relax or tear down
+		}
+		s.fecLowWindows++
+		if s.fecLowWindows < fecDisengageWindows {
+			// Not yet confident the link recovered: relax parity toward the base
+			// but keep FEC engaged so a quick relapse stays protected.
+			if s.fecEnc != nil {
+				s.fecEnc.SetParity(s.fecAutoBaseParity)
+			}
+			return
+		}
+		// Sustained clean windows: tear FEC all the way down to raw packets. The
+		// encoder is kept (block numbering stays monotonic); its buffered tail and
+		// any queued shards are dropped here and recovered by the ARQ retransmit
+		// backstop, which still holds those sequences un-acked and resends them raw.
+		s.fecActive = false
+		s.fecLowWindows = 0
 		if s.fecEnc != nil {
-			s.fecEnc.SetParity(s.fecAutoBaseParity)
+			_, _ = s.fecEnc.Flush()
+		}
+		s.fecShardQueue = nil
+		if s.log != nil {
+			s.log.Debugf("Stream %d: auto-FEC disengaged after %d clean windows (loss=%.0f%%) — back to raw packets", s.ID, fecDisengageWindows, loss*100)
 		}
 		return
 	}
@@ -515,7 +577,8 @@ func (s *Stream_server) maybeAdjustAutoFEC() {
 			// relax to the base rate. The unrecoverable block is left to ARQ rather
 			// than protected with a giant Reed-Solomon encode that would only strain
 			// the server. This is the "drop instead of rebuild" behavior.
-			if s.fecEnc != nil {
+			s.fecLowWindows = 0
+			if s.fecActive && s.fecEnc != nil {
 				s.fecEnc.SetParity(s.fecAutoBaseParity)
 				if s.log != nil {
 					s.log.Debugf("Stream %d: Super-FEC disengaged (loss=%.0f%% > %.0f%% ceiling) — dropping FEC protection to spare server", s.ID, loss*100, s.fecSuperLossCeil*100)
@@ -540,12 +603,9 @@ func (s *Stream_server) maybeAdjustAutoFEC() {
 			if parity < s.fecAutoBaseParity {
 				parity = s.fecAutoBaseParity
 			}
-			if s.fecEnc == nil {
-				s.fecEnc = fec.NewEncoder(s.fecAutoBlock, parity)
-			} else {
-				s.fecEnc.SetParity(parity)
-			}
-			if s.log != nil {
+			wasActive := s.fecActive
+			s.engageAutoFECLocked(parity)
+			if s.log != nil && !wasActive {
 				s.log.Debugf("Stream %d: Super-FEC engaged (loss=%.0f%%, parity=%d, cap=%d)", s.ID, loss*100, parity, superCap)
 			}
 			return
@@ -559,41 +619,53 @@ func (s *Stream_server) maybeAdjustAutoFEC() {
 	if s.fecAutoMaxParity > 0 && parity > s.fecAutoMaxParity {
 		parity = s.fecAutoMaxParity
 	}
-	if s.fecEnc == nil {
-		s.fecEnc = fec.NewEncoder(s.fecAutoBlock, parity)
-		if s.log != nil {
-			s.log.Debugf("Stream %d: auto-enabled FEC (loss=%.0f%%, parity=%d)", s.ID, loss*100, parity)
-		}
-	} else {
-		s.fecEnc.SetParity(parity)
+	wasActive := s.fecActive
+	s.engageAutoFECLocked(parity)
+	if s.log != nil && !wasActive {
+		s.log.Debugf("Stream %d: auto-enabled FEC (loss=%.0f%%, parity=%d)", s.ID, loss*100, parity)
 	}
 }
 
-// FECEnabled reports whether this stream diverts data through FEC.
+// engageAutoFECLocked (re)activates download FEC at the given parity. It creates
+// the encoder on first use and otherwise reuses the existing one so block
+// numbering stays monotonic across any prior disengage. Resets the clean-window
+// counter used for disengage hysteresis. Callers must hold fecMu.
+func (s *Stream_server) engageAutoFECLocked(parity int) {
+	if s.fecEnc == nil {
+		s.fecEnc = fec.NewEncoder(s.fecAutoBlock, parity)
+	} else {
+		s.fecEnc.SetParity(parity)
+	}
+	s.fecActive = true
+	s.fecLowWindows = 0
+}
+
+// FECEnabled reports whether this stream is currently diverting data through FEC.
 func (s *Stream_server) FECEnabled() bool {
 	if s == nil {
 		return false
 	}
 	s.fecMu.Lock()
-	on := s.fecEnc != nil
+	on := s.fecActive
 	s.fecMu.Unlock()
 	return on
 }
 
 // feedFECData packs a data packet into a FEC unit and buffers it into the
 // encoder, appending any shard frames produced at a block boundary.
-func (s *Stream_server) feedFECData(seq uint16, fragID uint8, payload []byte) {
+func (s *Stream_server) feedFECData(seq uint16, fragID uint8, payload []byte) bool {
 	unit := VpnProto.PackFECDataUnit(seq, fragID, payload)
 	s.fecMu.Lock()
 	defer s.fecMu.Unlock()
-	if s.fecEnc == nil {
-		return
+	if !s.fecActive || s.fecEnc == nil {
+		return false
 	}
 	frames, err := s.fecEnc.AddPacket(unit)
 	if err != nil {
-		return
+		return false
 	}
 	s.fecShardQueue = append(s.fecShardQueue, frames...)
+	return true
 }
 
 // flushFEC emits a short trailing block for whatever data units are buffered,
@@ -601,7 +673,7 @@ func (s *Stream_server) feedFECData(seq uint16, fragID uint8, payload []byte) {
 func (s *Stream_server) flushFEC() {
 	s.fecMu.Lock()
 	defer s.fecMu.Unlock()
-	if s.fecEnc == nil {
+	if !s.fecActive || s.fecEnc == nil {
 		return
 	}
 	frames, err := s.fecEnc.Flush()
@@ -636,6 +708,9 @@ func (s *Stream_server) HasBufferedFECWork() bool {
 	}
 	s.fecMu.Lock()
 	defer s.fecMu.Unlock()
+	if !s.fecActive {
+		return false
+	}
 	if len(s.fecShardQueue) > 0 {
 		return true
 	}

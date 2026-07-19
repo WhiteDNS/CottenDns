@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -657,7 +657,12 @@ func (s *Server) fecDequeueFromStream(stream *Stream_server, id int32) (*serverS
 				putTXPacketToPool(popped)
 				continue
 			}
-			stream.feedFECData(popped.SequenceNum, popped.FragmentID, popped.Payload)
+			if !stream.feedFECData(popped.SequenceNum, popped.FragmentID, popped.Payload) {
+				// Auto-FEC may have disengaged after the caller observed it active.
+				// Send this already-popped packet raw instead of dropping it until
+				// the ARQ retransmission timer fires.
+				return popped, true
+			}
 			putTXPacketToPool(popped)
 			if frame, ok := stream.popFECShard(); ok {
 				return s.fecShardTXPacket(frame), true
