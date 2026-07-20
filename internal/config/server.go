@@ -130,6 +130,29 @@ type ServerConfig struct {
 	// is 16-bit (65535 slots) but that many live sessions is far more load than a
 	// single node should carry, so this defaults to 2048 (the TCP_MAX_CONNS ceiling).
 	MaxActiveSessions                 int      `toml:"MAX_ACTIVE_SESSIONS"`
+
+	// Client policy ceilings, advertised to the client in SESSION_ACCEPT so it
+	// clamps itself. Without them a single client configured with a huge ARQ
+	// window, an aggressive ping interval, or heavy duplication can take a
+	// disproportionate share of a public server.
+	//
+	// Every one of these defaults to 0, meaning "state no ceiling". When all of
+	// them are 0 the server appends no policy block at all and SESSION_ACCEPT
+	// is byte-for-byte what it was before, so upgrading changes nothing until
+	// an operator opts in. The wire layout matches MasterDnsVPN's, so those
+	// clients honour these ceilings too.
+	MaxAllowedClientPacketDuplication      int     `toml:"MAX_ALLOWED_CLIENT_PACKET_DUPLICATION_COUNT"`
+	MaxAllowedClientSetupPacketDuplication int     `toml:"MAX_ALLOWED_CLIENT_SETUP_PACKET_DUPLICATION_COUNT"`
+	MaxAllowedClientUploadMTU              int     `toml:"MAX_ALLOWED_CLIENT_UPLOAD_MTU"`
+	MaxAllowedClientDownloadMTU            int     `toml:"MAX_ALLOWED_CLIENT_DOWNLOAD_MTU"`
+	MaxAllowedClientRxTxWorkers            int     `toml:"MAX_ALLOWED_CLIENT_RX_TX_WORKERS"`
+	MinAllowedClientPingAggressiveInterval float64 `toml:"MIN_ALLOWED_CLIENT_PING_AGGRESSIVE_INTERVAL_SECONDS"`
+	MaxAllowedClientPacketsPerBatch        int     `toml:"MAX_ALLOWED_CLIENT_PACKETS_PER_BATCH"`
+	MaxAllowedClientARQWindowSize          int     `toml:"MAX_ALLOWED_CLIENT_ARQ_WINDOW_SIZE"`
+	MaxAllowedClientARQDataNackMaxGap      int     `toml:"MAX_ALLOWED_CLIENT_ARQ_DATA_NACK_MAX_GAP"`
+	MinAllowedClientCompressionMinSize     int     `toml:"MIN_ALLOWED_CLIENT_COMPRESSION_MIN_SIZE"`
+	MinAllowedClientARQInitialRTOSeconds   float64 `toml:"MIN_ALLOWED_CLIENT_ARQ_INITIAL_RTO_SECONDS"`
+
 	MaxDNSResponseBytes               int      `toml:"MAX_DNS_RESPONSE_BYTES"`
 	DropLogIntervalSecs               float64  `toml:"DROP_LOG_INTERVAL_SECONDS"`
 	InvalidCookieWindowSecs           float64  `toml:"INVALID_COOKIE_WINDOW_SECONDS"`

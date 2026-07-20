@@ -23,6 +23,7 @@ import (
 	fragmentStore "cottendns-go/internal/fragmentstore"
 	"cottendns-go/internal/logger"
 	"cottendns-go/internal/security"
+	VpnProto "cottendns-go/internal/vpnproto"
 )
 
 const (
@@ -34,7 +35,6 @@ const (
 	mtuProbeDownMinSize = mtuProbeUpMinSize + 2
 	mtuProbeMinDownSize = 30
 	mtuProbeMaxDownSize = 4096
-	sessionAcceptSize   = 8
 )
 
 var preSessionPacketTypes = buildPreSessionPacketTypes()
@@ -112,6 +112,32 @@ type Server struct {
 	dohRequestRejected      atomic.Uint64
 	sniPassthroughActive    atomic.Uint64
 	sniPassthroughFailures  atomic.Uint64
+
+	// clientPolicy is the ceiling set advertised to clients in SESSION_ACCEPT.
+	// Resolved once at construction because it never changes at runtime. A zero
+	// value means the operator configured no ceilings, and no policy block is
+	// put on the wire at all.
+	clientPolicy VpnProto.SessionAcceptClientPolicy
+}
+
+// buildClientPolicy maps the MAX_ALLOWED_CLIENT_* / MIN_ALLOWED_CLIENT_* config
+// keys onto the wire policy. It lives here rather than on ServerConfig because
+// config cannot import vpnproto: vpnproto depends on security, which depends on
+// config, so the accessor would close an import cycle.
+func buildClientPolicy(cfg config.ServerConfig) VpnProto.SessionAcceptClientPolicy {
+	return VpnProto.SessionAcceptClientPolicy{
+		MaxPacketDuplicationCount: cfg.MaxAllowedClientPacketDuplication,
+		MaxSetupDuplicationCount:  cfg.MaxAllowedClientSetupPacketDuplication,
+		MaxUploadMTU:              cfg.MaxAllowedClientUploadMTU,
+		MaxDownloadMTU:            cfg.MaxAllowedClientDownloadMTU,
+		MaxRxTxWorkers:            cfg.MaxAllowedClientRxTxWorkers,
+		MinPingAggressiveInterval: cfg.MinAllowedClientPingAggressiveInterval,
+		MaxPacketsPerBatch:        cfg.MaxAllowedClientPacketsPerBatch,
+		MaxARQWindowSize:          cfg.MaxAllowedClientARQWindowSize,
+		MaxARQDataNackMaxGap:      cfg.MaxAllowedClientARQDataNackMaxGap,
+		MinCompressionMinSize:     cfg.MinAllowedClientCompressionMinSize,
+		MinARQInitialRTOSeconds:   cfg.MinAllowedClientARQInitialRTOSeconds,
+	}
 }
 
 // Stats is a point-in-time snapshot of operational counters maintained by the
@@ -221,7 +247,7 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 		socksConnectTimeout = 8 * time.Second
 	}
 	dnsDeferredWorkers, connectDeferredWorkers, dnsDeferredQueue, connectDeferredQueue := splitDeferredSessionPools(cfg.DeferredSessionWorkers, cfg.DeferredSessionQueueLimit)
-	return &Server{
+	srv := &Server{
 		cfg:                    cfg,
 		log:                    log,
 		codec:                  codec,
@@ -231,6 +257,7 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 		deferredDNSSession:     newDeferredSessionProcessor(dnsDeferredWorkers, dnsDeferredQueue, log),
 		deferredConnectSession: newDeferredSessionProcessor(connectDeferredWorkers, connectDeferredQueue, log),
 		invalidCookieTracker:   newInvalidCookieTracker(),
+		clientPolicy:           buildClientPolicy(cfg),
 		dnsCache: dnsCache.New(
 			cfg.DNSCacheMaxRecords,
 			time.Duration(cfg.DNSCacheTTLSeconds*float64(time.Second)),
@@ -279,6 +306,13 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 			},
 		},
 	}
+
+	// Enforce the MTU ceilings server-side as well as advertising them in the
+	// SESSION_ACCEPT policy. Advertising only binds a client that cooperates;
+	// this binds every client, including older ones that never read a policy.
+	srv.sessions.setClientMTUCeilings(cfg.MaxAllowedClientUploadMTU, cfg.MaxAllowedClientDownloadMTU)
+
+	return srv
 }
 
 // SetCodecSet enables encryption-method auto-detection by giving the server a

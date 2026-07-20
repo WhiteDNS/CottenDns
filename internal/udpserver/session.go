@@ -200,7 +200,13 @@ type sessionStore struct {
 	// maxActiveSessions caps how many sessions may be live at once. 0 means fall
 	// back to the hard slot ceiling (maxServerSessionSlots).
 	maxActiveSessions int
-	sessionInitTTL    time.Duration
+	// maxClientUploadMTU/maxClientDownloadMTU are the operator's ceilings on
+	// what a client may request in SESSION_INIT. Zero means no ceiling. Set via
+	// setClientMTUCeilings rather than the positional options list, which is
+	// already long enough that another anonymous int would invite mix-ups.
+	maxClientUploadMTU   int
+	maxClientDownloadMTU int
+	sessionInitTTL       time.Duration
 	recentlyClosedTTL time.Duration
 	recentlyClosedCap int
 	// streamCapRejections counts every getOrCreateStream call that was
@@ -335,6 +341,8 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 		binary.BigEndian.Uint16(payload[2:4]),
 		binary.BigEndian.Uint16(payload[4:6]),
 		maxPacketsPerBatch,
+		s.maxClientUploadMTU,
+		s.maxClientDownloadMTU,
 	)
 	copy(record.VerifyCode[:], payload[6:10])
 	record.Cookie = s.randomCookieLocked()
@@ -347,6 +355,16 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 	delete(s.recentClosed, uint16(slot))
 	s.nextID = uint16(nextSessionID(uint16(slot)))
 	return record, false, nil
+}
+
+// setClientMTUCeilings bounds what a client may request in SESSION_INIT. Zero
+// for either value leaves that dimension uncapped. Call before serving.
+func (s *sessionStore) setClientMTUCeilings(maxUploadMTU int, maxDownloadMTU int) {
+	if s == nil {
+		return
+	}
+	s.maxClientUploadMTU = maxUploadMTU
+	s.maxClientDownloadMTU = maxDownloadMTU
 }
 
 func (s *sessionStore) expireReuseLocked(nowUnixNano int64) {
@@ -658,6 +676,20 @@ func clampMTU(value uint16) uint16 {
 	return value
 }
 
+// clampMTUCeiling applies an operator-configured ceiling on top of the protocol
+// bounds already applied by clampMTU. A ceiling of zero or less means none was
+// configured. The result never falls below minSessionMTU: a ceiling set absurdly
+// low must not produce a session too small to carry a packet.
+func clampMTUCeiling(value uint16, ceiling int) uint16 {
+	if ceiling <= 0 || int(value) <= ceiling {
+		return value
+	}
+	if ceiling < minSessionMTU {
+		return minSessionMTU
+	}
+	return uint16(ceiling)
+}
+
 func isValidSessionResponseMode(value uint8) bool {
 	return value <= mtuProbeModeBase64
 }
@@ -725,12 +757,21 @@ func nextSessionID(current uint16) uint16 {
 	return current + 1
 }
 
-func (r *sessionRecord) applyMTUFromSessionInit(uploadMTU uint16, downloadMTU uint16, maxPacketsPerBatch int) {
+// applyMTUFromSessionInit sets the session MTUs from what the client asked for
+// in SESSION_INIT, bounded by the server's ceilings.
+//
+// The ceilings are enforced here rather than merely advertised in the
+// SESSION_ACCEPT policy block, because advertising only works for a client that
+// chooses to cooperate. The download MTU in particular is a direct server cost
+// -- it sizes every response the server builds and sends -- so a client that
+// ignores the policy, or an older one that never reads it, must still be held
+// to it. A ceiling of zero means the operator set none.
+func (r *sessionRecord) applyMTUFromSessionInit(uploadMTU uint16, downloadMTU uint16, maxPacketsPerBatch int, maxUploadMTU int, maxDownloadMTU int) {
 	if r == nil {
 		return
 	}
-	r.UploadMTU = clampMTU(uploadMTU)
-	r.DownloadMTU = clampMTU(downloadMTU)
+	r.UploadMTU = clampMTUCeiling(clampMTU(uploadMTU), maxUploadMTU)
+	r.DownloadMTU = clampMTUCeiling(clampMTU(downloadMTU), maxDownloadMTU)
 	r.DownloadMTUBytes = int(r.DownloadMTU)
 	r.MaxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(r.DownloadMTUBytes, 80, maxPacketsPerBatch)
 }

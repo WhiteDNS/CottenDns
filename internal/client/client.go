@@ -133,6 +133,12 @@ type Client struct {
 	sessionInitCursor   int
 	sessionInitBusyUnix atomic.Int64
 	sessionResetPending atomic.Bool
+
+	// serverPolicy holds the ceilings the server stated in SESSION_ACCEPT, or
+	// nil when it stated none. Published atomically because it is written on
+	// the init collector goroutine while the send path, stream setup and ping
+	// manager are already reading the values it governs.
+	serverPolicy atomic.Pointer[VpnProto.SessionAcceptClientPolicy]
 	runtimeResetPending atomic.Bool
 	sessionResetSignal  chan struct{}
 	rxDroppedPackets    atomic.Uint64

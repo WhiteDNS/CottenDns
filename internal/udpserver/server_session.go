@@ -858,25 +858,22 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 
 	// The accept payload carries the assigned session ID at the same width as
 	// the header, so the whole layout shifts down a byte for legacy clients:
-	// [sid(1|2)] [cookie] [compression] [verifyCode(4)].
-	var responsePayload [sessionAcceptSize]byte
-	offset := 0
-	if record.LegacySessionID {
-		responsePayload[0] = byte(record.ID)
-		offset = 1
-	} else {
-		responsePayload[0] = byte(record.ID >> 8)
-		responsePayload[1] = byte(record.ID)
-		offset = 2
-	}
-	responsePayload[offset] = record.Cookie
-	responsePayload[offset+1] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
-	copy(responsePayload[offset+2:], record.VerifyCode[:])
+	// [sid(1|2)] [cookie] [compression] [verifyCode(4)] [policy(13, optional)].
+	// The policy block is appended only when the operator configured ceilings;
+	// otherwise this is byte-for-byte the payload that shipped before.
+	responsePayload := VpnProto.EncodeSessionAccept(
+		record.ID,
+		record.Cookie,
+		compression.PackPair(record.UploadCompression, record.DownloadCompression),
+		record.VerifyCode,
+		s.clientPolicy,
+		record.LegacySessionID,
+	)
 
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:       0,
 		PacketType:      Enums.PACKET_SESSION_ACCEPT,
-		Payload:         responsePayload[:offset+2+len(record.VerifyCode)],
+		Payload:         responsePayload,
 		LegacySessionID: record.LegacySessionID,
 	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {

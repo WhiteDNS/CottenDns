@@ -118,6 +118,40 @@ func TestEmitsByteIdenticalMasterDNSFrames(t *testing.T) {
 	}
 }
 
+// The policy block is only useful if MasterDNS clients can actually read it, so
+// pin our encoder against theirs. Captured from MasterDnsVPN's
+// EncodeSessionAcceptClientPolicy at commit bc69a58 for the same input.
+func TestPolicyBlockMatchesMasterDNSEncoder(t *testing.T) {
+	const goldenPolicy = "53c8057810280807d040007836"
+	const goldenAccept = "c85a12deadbeef53c8057810280807d040007836"
+
+	policy := SessionAcceptClientPolicy{
+		MaxPacketDuplicationCount: 3,
+		MaxSetupDuplicationCount:  5,
+		MaxUploadMTU:              200,
+		MaxDownloadMTU:            1400,
+		MaxRxTxWorkers:            16,
+		MinPingAggressiveInterval: 0.20,
+		MaxPacketsPerBatch:        8,
+		MaxARQWindowSize:          2000,
+		MaxARQDataNackMaxGap:      64,
+		MinCompressionMinSize:     120,
+		MinARQInitialRTOSeconds:   0.25,
+	}
+
+	block := EncodeSessionAcceptClientPolicy(policy)
+	if got := hex.EncodeToString(block[:]); got != goldenPolicy {
+		t.Fatalf("policy block differs from MasterDnsVPN's\n got  %s\n want %s", got, goldenPolicy)
+	}
+
+	// And the whole legacy accept payload, which is what a MasterDNS client
+	// actually parses: base 7 bytes then the block.
+	full := EncodeSessionAccept(200, 0x5A, 0x12, [4]byte{0xDE, 0xAD, 0xBE, 0xEF}, policy, true)
+	if got := hex.EncodeToString(full); got != goldenAccept {
+		t.Fatalf("legacy accept with policy differs from MasterDnsVPN's\n got  %s\n want %s", got, goldenAccept)
+	}
+}
+
 // MasterDnsVPN's SESSION_ACCEPT payload is [sid(1)][cookie][compression]
 // [verify(4)] = 7 bytes, and its decoder requires at least that many. The
 // server builds this layout for legacy sessions, so pin the shape here: a

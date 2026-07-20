@@ -103,7 +103,7 @@ func (c *Client) buildTunnelTXTQueryRaw(domain string, options VpnProto.BuildOpt
 }
 
 func (c *Client) buildEncodedAutoWithCompressionTrace(options VpnProto.BuildOptions) ([]byte, error) {
-	raw, err := VpnProto.BuildRawAuto(options, c.cfg.CompressionMinSize)
+	raw, err := VpnProto.BuildRawAuto(options, c.effectiveCompressionMinSize())
 	if err != nil {
 		return nil, err
 	}

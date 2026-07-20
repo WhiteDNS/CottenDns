@@ -121,7 +121,7 @@ func (p *PingManager) nextInterval(nowNano int64) time.Duration {
 	warmThresholdNano := int64(p.client.cfg.PingWarmThreshold())
 
 	if nowNano-lastNonPingSent < warmThresholdNano || nowNano-lastNonPongRecv < warmThresholdNano {
-		return p.client.cfg.PingAggressiveInterval()
+		return p.client.effectivePingAggressiveInterval()
 	}
 
 	idleSent := nowNano - lastNonPingSent
@@ -147,7 +147,7 @@ func (p *PingManager) pingLoop() {
 	defer p.wg.Done()
 
 	p.client.log.Debugf("\U0001F3D3 <cyan>Ping Manager loop started</cyan>")
-	timer := time.NewTimer(p.client.cfg.PingAggressiveInterval())
+	timer := time.NewTimer(p.client.effectivePingAggressiveInterval())
 	defer timer.Stop()
 
 	for {

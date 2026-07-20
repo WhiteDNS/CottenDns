@@ -31,7 +31,7 @@ func TestApplyMTUFromSessionInit_HonorsClientMTU(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &sessionRecord{}
-			r.applyMTUFromSessionInit(tc.upload, tc.download, 5)
+			r.applyMTUFromSessionInit(tc.upload, tc.download, 5, 0, 0)
 
 			if got := int(r.DownloadMTU); got != tc.wantDownload {
 				t.Errorf("DownloadMTU = %d, want %d", got, tc.wantDownload)
@@ -52,14 +52,14 @@ func TestApplyMTUFromSessionInit_HonorsClientMTU(t *testing.T) {
 // session record must reflect the new, lower value.
 func TestApplyMTUFromSessionInit_ReinitLowersMTU(t *testing.T) {
 	first := &sessionRecord{}
-	first.applyMTUFromSessionInit(200, 4000, 5)
+	first.applyMTUFromSessionInit(200, 4000, 5, 0, 0)
 	if first.DownloadMTUBytes != 4000 {
 		t.Fatalf("first session download = %d, want 4000", first.DownloadMTUBytes)
 	}
 
 	// New session after restart at the re-derived (lower) operating point.
 	second := &sessionRecord{}
-	second.applyMTUFromSessionInit(120, 1000, 5)
+	second.applyMTUFromSessionInit(120, 1000, 5, 0, 0)
 	if second.DownloadMTUBytes != 1000 {
 		t.Fatalf("re-init session download = %d, want 1000 (server honors lowered MTU)", second.DownloadMTUBytes)
 	}

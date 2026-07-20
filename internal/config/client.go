@@ -174,6 +174,13 @@ type ClientConfig struct {
 	SessionInitRetryLinearAfter          int               `toml:"SESSION_INIT_RETRY_LINEAR_AFTER"`
 	SessionInitRetryMaxSeconds           float64           `toml:"SESSION_INIT_RETRY_MAX_SECONDS"`
 	SessionInitBusyRetryIntervalSeconds  float64           `toml:"SESSION_INIT_BUSY_RETRY_INTERVAL_SECONDS"`
+	// SessionInitRacingCount is how many distinct resolvers one SESSION_INIT is
+	// raced across. The server keys sessions by the init signature and reuses
+	// within SESSION_INIT_REUSE_TTL, so the same init arriving via several
+	// resolvers still yields exactly one session. Higher values connect faster
+	// on lossy networks where any single resolver may be dead, at the cost of
+	// that many queries per attempt. 1 disables racing.
+	SessionInitRacingCount int `toml:"SESSION_INIT_RACING_COUNT"`
 	LogLevel                             string            `toml:"LOG_LEVEL"`
 	LogToFile                            bool              `toml:"LOG_TO_FILE"`
 	LogDir                               string            `toml:"LOG_DIR"`
@@ -379,6 +386,7 @@ func defaultClientConfig() ClientConfig {
 		SessionInitRetryLinearAfter:           5,
 		SessionInitRetryMaxSeconds:            60.0,
 		SessionInitBusyRetryIntervalSeconds:   60.0,
+		SessionInitRacingCount:                3,
 		LogLevel:                              "INFO",
 		LogToFile:                             true,
 		LogDir:                                "logs",
@@ -730,6 +738,9 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	cfg.SessionInitRetryLinearAfter = clampInt(defaultIntBelow(cfg.SessionInitRetryLinearAfter, 0, 5), 0, 1000)
 	cfg.SessionInitRetryMaxSeconds = clampFloat(defaultFloatAtMostZero(cfg.SessionInitRetryMaxSeconds, 60.0), cfg.SessionInitRetryBaseSeconds, 3600.0)
 	cfg.SessionInitBusyRetryIntervalSeconds = clampFloat(defaultFloatAtMostZero(cfg.SessionInitBusyRetryIntervalSeconds, 60.0), 1.0, 3600.0)
+	// Capped well below the resolver pool size: racing every resolver would turn
+	// one connect into a burst large enough to look like a flood.
+	cfg.SessionInitRacingCount = clampInt(defaultIntBelow(cfg.SessionInitRacingCount, 1, 3), 1, 8)
 
 	cfg.LogDir = strings.TrimSpace(cfg.LogDir)
 	if cfg.LogDir == "" {

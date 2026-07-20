@@ -481,6 +481,16 @@ SESSION_INIT_RETRY_MAX_SECONDS = 60.0
 # Clamped to [1s, 3600s].
 SESSION_INIT_BUSY_RETRY_INTERVAL_SECONDS = 60.0
 
+# How many distinct resolvers one SESSION_INIT is raced across.
+# Racing turns a slow serial "try one, wait a full timeout, try the next"
+# connect into "ask a few at once, take the first reply", which is a large win
+# on lossy networks where any single resolver may be dead. The server keys
+# sessions by the init signature and reuses within SESSION_INIT_REUSE_TTL, so
+# the same init arriving via several resolvers still yields exactly one session.
+# Higher values cost that many queries per attempt. 1 disables racing.
+# Clamped to [1, 8]. Default: 3.
+SESSION_INIT_RACING_COUNT = 3
+
 # Ping/keepalive pacing.
 # These control how aggressively the client sends ping traffic depending on
 # recent activity.

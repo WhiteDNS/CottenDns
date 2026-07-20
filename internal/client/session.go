@@ -66,10 +66,18 @@ func (c *Client) InitializeSession(maxAttempts int) error {
 // Racing turns a slow serial "try one, wait a full timeout, try the next" connect
 // into "ask a few at once, take the first reply", which is a large win on lossy
 // networks where any single resolver may be dead.
-const sessionInitRaceCount = 3
+//
+// Operator-tunable via SESSION_INIT_RACING_COUNT; the default preserves the
+// long-standing hardcoded value of 3.
+func (c *Client) sessionInitRaceCount() int {
+	if c.cfg.SessionInitRacingCount < 1 {
+		return 1
+	}
+	return c.cfg.SessionInitRacingCount
+}
 
 func (c *Client) initializeSessionOnce() error {
-	conns, initPayload, verifyCode, err := c.nextSessionInitRacers(sessionInitRaceCount)
+	conns, initPayload, verifyCode, err := c.nextSessionInitRacers(c.sessionInitRaceCount())
 	if err != nil {
 		return err
 	}
@@ -159,6 +167,7 @@ func (c *Client) applySessionAccept(packet VpnProto.Packet, initPayload []byte, 
 	c.uploadCompression, c.downloadCompression = compression.SplitPair(packet.Payload[3])
 	c.sessionReady = true
 	c.applySessionCompressionPolicy()
+	c.applyServerClientPolicy(packet.Payload)
 	c.clearSessionInitBusyUntil()
 	c.resetSessionInitState()
 	c.clearSessionResetPending()
@@ -451,7 +460,7 @@ func (c *Client) applySyncedMTUState(uploadMTU int, downloadMTU int, uploadChars
 	c.syncedDownloadMTU = downloadMTU
 	c.syncedUploadChars = uploadChars
 	c.safeUploadMTU = computeSafeUploadMTU(uploadMTU, c.mtuCryptoOverhead)
-	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(uploadMTU, 80, c.cfg.MaxPacketsPerBatch)
+	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(uploadMTU, 80, c.effectiveMaxPacketsPerBatch())
 	c.applySessionCompressionPolicy()
 	if c.log != nil && c.successMTUChecks {
 		c.log.Infof("\U0001F4CF <green>MTU state applied: UP=%d, DOWN=%d</green>", uploadMTU, downloadMTU)

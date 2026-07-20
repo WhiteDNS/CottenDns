@@ -214,6 +214,56 @@ MAX_STREAMS_PER_SESSION = 4096
 # frees. Range: 1..65535. Default: 2048.
 MAX_ACTIVE_SESSIONS = 2048
 
+# ---------------------------------------------------------------------------
+# Client resource policy
+# ---------------------------------------------------------------------------
+# Ceilings (and two floors) the server states to clients in SESSION_ACCEPT, so a
+# client configured too aggressively clamps itself instead of taking a
+# disproportionate share of a shared server.
+#
+# Every key below defaults to 0, meaning "state no limit". While all of them are
+# 0 the server sends no policy at all and SESSION_ACCEPT is byte-for-byte what
+# it has always been, so leaving this section alone changes nothing.
+#
+# The wire format matches the MasterDNS/StormDNS family, so those clients honour
+# these limits too. The two MTU ceilings are additionally enforced server-side,
+# so they bind even a client that ignores the policy.
+
+# Largest upload/download MTU a client may request in SESSION_INIT.
+# 0 disables the ceiling. The download MTU sizes every response the server
+# builds, so it is the one with the most direct effect on server cost.
+MAX_ALLOWED_CLIENT_UPLOAD_MTU = 0
+MAX_ALLOWED_CLIENT_DOWNLOAD_MTU = 0
+
+# Largest ARQ window a client may use. The window bounds how much
+# unacknowledged data the server tracks per stream. 0 disables the ceiling.
+MAX_ALLOWED_CLIENT_ARQ_WINDOW_SIZE = 0
+MAX_ALLOWED_CLIENT_ARQ_DATA_NACK_MAX_GAP = 0
+
+# Largest packed-block batch a client may ask the server to assemble.
+MAX_ALLOWED_CLIENT_PACKETS_PER_BATCH = 0
+
+# Largest packet-duplication factors a client may use (0..15 each). Duplication
+# multiplies the query volume the server receives.
+MAX_ALLOWED_CLIENT_PACKET_DUPLICATION_COUNT = 0
+MAX_ALLOWED_CLIENT_SETUP_PACKET_DUPLICATION_COUNT = 0
+
+# Largest number of client-side RX/TX workers.
+MAX_ALLOWED_CLIENT_RX_TX_WORKERS = 0
+
+# Fastest aggressive ping interval a client may use, in seconds. This is the
+# most direct control over the query rate a single client can generate.
+# Wire range is 0.05..1.00; 0 disables the floor.
+MIN_ALLOWED_CLIENT_PING_AGGRESSIVE_INTERVAL_SECONDS = 0.0
+
+# Smallest compression threshold a client may use, in bytes. A floor stops a
+# client asking the server to compress every tiny packet. 0 disables it.
+MIN_ALLOWED_CLIENT_COMPRESSION_MIN_SIZE = 0
+
+# Smallest initial ARQ RTO a client may use, in seconds. A floor stops a client
+# retransmitting far too eagerly. Wire range is 0.05..1.00; 0 disables it.
+MIN_ALLOWED_CLIENT_ARQ_INITIAL_RTO_SECONDS = 0.0
+
 # Hard upper bound (in bytes) on the size of an upstream DNS response that
 # the server will fragment and tunnel back to the client. Responses larger
 # than this are dropped before fragmentation, preventing attacker-shaped

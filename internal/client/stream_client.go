@@ -175,7 +175,7 @@ func (c *Client) new_stream(streamID uint16, conn net.Conn, targetPayload []byte
 	}
 
 	arqCfg := arq.Config{
-		WindowSize:                  c.cfg.ARQWindowSize,
+		WindowSize:                  c.effectiveARQWindowSize(),
 		RTO:                         c.cfg.ARQInitialRTOSeconds,
 		MaxRTO:                      c.cfg.ARQMaxRTOSeconds,
 		StartPaused:                 conn != nil && streamID != 0 && (c.cfg.ProtocolType == "SOCKS5" || c.cfg.ProtocolType == "TCP"),
@@ -613,7 +613,7 @@ func (c *Client) InitVirtualStream0() {
 	}
 
 	arqCfg := arq.Config{
-		WindowSize:                  c.cfg.ARQWindowSize,
+		WindowSize:                  c.effectiveARQWindowSize(),
 		RTO:                         c.cfg.ARQInitialRTOSeconds,
 		MaxRTO:                      c.cfg.ARQMaxRTOSeconds,
 		IsVirtual:                   true, // Bypasses internal timeout closures

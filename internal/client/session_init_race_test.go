@@ -37,7 +37,7 @@ func TestNextSessionInitRacersReturnsDistinctResolvers(t *testing.T) {
 
 func TestNextSessionInitRacersCapsAtValidResolvers(t *testing.T) {
 	c := buildTestClientWithResolvers(config.ClientConfig{}, "only")
-	conns, _, _, err := c.nextSessionInitRacers(sessionInitRaceCount)
+	conns, _, _, err := c.nextSessionInitRacers(c.sessionInitRaceCount())
 	if err != nil {
 		t.Fatalf("racers error: %v", err)
 	}
