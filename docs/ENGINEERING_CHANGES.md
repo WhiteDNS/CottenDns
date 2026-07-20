@@ -529,12 +529,41 @@ preset is malformed before that point.
   always-on FEC.
 - `FEC_AUTO_ENABLED` (true) / `FEC_AUTO_LOSS_THRESHOLD` (0.3) /
   `FEC_AUTO_MAX_PARITY` (0=auto) — loss-triggered FEC.
+- `DOT_LISTENER_ENABLED` (false) / `DOT_LISTEN_PORT` (853) — DNS-over-TLS listener.
+- `DOH_LISTENER_ENABLED` (false) / `DOH_LISTEN_PORT` (443) / `DOH_PATH`
+  (`/dns-query`) — DNS-over-HTTPS listener. Both are only needed to point clients
+  **directly** at this server; public-resolver DoT/DoH needs no server change.
+- `DOH_COEXIST_MODE` (`auto`) — `auto`/`behind` never bind the TLS port (the panel
+  keeps :443 and forwards DoH to `DOH_BEHIND_PORT`); `front` takes :443 and
+  SNI-splices everything else to `DOH_SHARE_BACKEND`.
+- `DOH_BEHIND_PORT` (8453) / `DOH_SHARE_BACKEND` ("") / `DOH_SHARE_PROXY_PROTOCOL`
+  (false) — :443 coexistence with a co-hosted panel.
+- `TLS_CERT_FILE` / `TLS_KEY_FILE` / `ACME_ENABLED` (true) / `ACME_CACHE_DIR` /
+  `ACME_EMAIL` — TLS material, resolved cert/key → ACME → self-signed.
+- `ENCRYPTED_MAX_CONNS` (0 = ¾ of `TCP_MAX_CONNS`) — ceiling on DoT/DoH
+  connections so they cannot starve the plain TCP/53 survival path.
+- `DOH_MAX_INFLIGHT` / `DOH_MAX_INFLIGHT_BYTES` /
+  `DOH_REQUESTS_PER_SECOND_PER_IP` / `DOH_REQUEST_BURST_PER_IP` /
+  `DOH_TRUSTED_PROXY_CIDRS` — DoH-specific flood budgets.
 
 **Client (`client_config.toml`):**
 - `CONFIG_PRESET` (`default`, `speed`, `survival`, `tcp-survival`) — paired
   operational profile; explicit TOML/CLI values still win.
 - `RESOLVER_TRANSPORT` (auto) — `auto` (UDP, fall back to TCP/53 if UDP finds no
-  resolvers) | `udp` | `tcp`.
+  resolvers) | `udp` | `tcp` | `dot` | `doh`. `auto` never escalates into the
+  encrypted transports; picking `dot`/`doh` still falls back to UDP then TCP/53.
+- `RESOLVER_TLS_SERVER_NAME` ("") — SNI/certificate name for `dot`/`doh`. Leave
+  empty for public resolvers: the engine then verifies against the resolver's own
+  identity, and Cloudflare/Google/Quad9 carry their IP as a certificate SAN. Set it
+  only when pointing at your own DoT/DoH server.
+- `RESOLVER_TLS_PIN` ("") — base64 SHA-256 of the server certificate's
+  SubjectPublicKeyInfo. Replaces CA validation, so a self-signed server is trusted
+  exactly and nothing else is; pinning the SPKI survives certificate renewal.
+- `RESOLVER_TLS_INSECURE_SKIP_VERIFY` (false) — last resort; the payload stays
+  AEAD-encrypted regardless, but an unverified hop can be transparently intercepted.
+- `RESOLVER_DOT_PORT` (853) / `RESOLVER_DOH_PORT` (443) / `RESOLVER_DOH_PATH`
+  (`/dns-query`) — where the resolver entry's IP is contacted. Client-wide, not
+  per-resolver.
 - `RESOLVER_RATE_LIMIT_ENABLED` (true) — per-resolver adaptive pacing.
 - `QNAME_LABEL_LENGTH` (63) — QNAME label reshaping (smaller = shorter, jittered
   labels; lower fingerprint, less capacity).
@@ -568,8 +597,165 @@ preset is malformed before that point.
 
 ---
 
+## 17. Encrypted resolver transports (DoT / DoH)
+
+**Problem.** Sections 10 and 12 harden *what* the queries look like, but the
+client→resolver leg is still plaintext DNS on port 53. A censor does not have to
+break the tunnel's encryption to act on it: the volume, timing and shape of
+plaintext DNS on 53 is enough to fingerprint, throttle or poison. On networks that
+treat *any* heavy 53 traffic as suspicious, the tunnel is visible even when its
+payload is not readable.
+
+**What was added.** Two optional resolver transports:
+
+- **DoT** — DNS-over-TLS (RFC 7858), normally port 853.
+- **DoH** — DNS-over-HTTPS (RFC 8484), normally port 443.
+
+Both encrypt the client→resolver hop, so on the wire the tunnel looks like a
+device using an encrypted DNS provider.
+
+**These are a disguise, not a security layer.** The tunnel payload is already
+AEAD-encrypted end to end (section 5). TLS here buys traffic *shape*, not payload
+secrecy — worth being precise about, because it decides how much the certificate
+trust model actually matters.
+
+### 17.1 Opt-in only, but not a commitment
+
+`RESOLVER_TRANSPORT` gains `dot` and `doh`. Two deliberate rules:
+
+- **Nothing ever escalates into them.** `auto` still means UDP → TCP/53 only.
+  These transports disguise a *working* hop rather than rescue a broken one, so
+  entering them is always an explicit operator decision.
+- **Choosing one is still not a commitment.** Blocking 853/443 is a common
+  censorship response, so if the chosen transport cannot carry the tunnel the
+  client walks down on its own. A blocked TLS port degrades to the survival path
+  instead of failing to connect.
+
+```
+dot  ─► UDP ─► TCP/53          udp  ─► (no fallback)
+doh  ─► UDP ─► TCP/53          tcp  ─► (no fallback)
+auto ─► UDP ─► TCP/53
+```
+
+The chain is `resolverTransportChain()`; the walk is in `RunInitialMTUTests`,
+which re-probes the whole fleet on each step down.
+
+### 17.2 How they are wired into the data path
+
+The active transport is now an enum behind one interface
+(`streamDataTransport`) instead of a `useTCP` boolean, so the dispatcher does not
+grow a branch per transport:
+
+- **DoT reuses the TCP data plane verbatim.** DoT *is* DNS-over-TCP framing
+  inside TLS, so only the dial differs: `tcpDataManager` took a pluggable dialer,
+  and connection pooling, the 2-byte length framing, the read loop and the
+  `rxChannel` hand-off are shared with TCP/53 line for line.
+- **DoH is genuinely different** and gets its own transport: one HTTP POST per
+  query, HTTP/2 multiplexing over pooled connections, and answers pushed into the
+  **same `rxChannel` the UDP reader feeds** — so `handleInboundPacket` treats every
+  transport identically. In-flight POSTs are bounded (256) and a saturated burst is
+  shed rather than queued: ARQ retransmits, and shedding stops a burst from opening
+  unbounded sockets.
+
+### 17.3 Public resolvers need no server change
+
+The important operational point. Two distinct deployments:
+
+```
+A) public resolver  (no server change, no redeploy)
+   client ──DoH/DoT──► 1.1.1.1 ──plain DNS + your NS delegation──► your server
+
+B) direct           (needs DOT_/DOH_LISTENER_ENABLED)
+   client ──DoH/DoT──► your server
+```
+
+In (A) the encryption covers exactly the hop that gets fingerprinted, and the
+resolver reaches the tunnel server through normal delegation as it always did.
+The server's listeners are **only** for (B), and default to off.
+
+Resolvers are still configured the same way — a list of IPs. The endpoint is built
+from the entry plus the transport's own port/path, so `1.1.1.1` becomes
+`https://1.1.1.1:443/dns-query`. Cloudflare, Google and Quad9 publish certificates
+carrying their **IP as a SAN**, so (A) validates with no configuration at all.
+
+*Caveat:* the transport and its port/path are client-wide, not per-resolver. You
+cannot run one resolver over DoH while another stays on UDP, and providers using a
+different path cannot be mixed in one profile. The hedging is sequential
+(fallback), not parallel.
+
+### 17.4 Certificate trust
+
+Three modes, best first:
+
+1. **`RESOLVER_TLS_PIN`** — base64 SHA-256 of the server certificate's
+   SubjectPublicKeyInfo. Pinning *replaces* chain validation, so a self-signed or
+   private-CA server is trusted exactly and nothing else is. Pinning the SPKI
+   rather than the certificate lets the server renew without breaking clients.
+2. **Default** — normal hostname/CA verification. With `RESOLVER_TLS_SERVER_NAME`
+   unset the engine verifies against the resolver's own identity, which is what
+   makes public resolvers work unconfigured.
+3. **`RESOLVER_TLS_INSECURE_SKIP_VERIFY`** — last resort, off by default.
+
+Because the payload is already AEAD-encrypted, even (3) never exposes tunnel data.
+Pinning is still preferred: an unverified hop can be transparently intercepted,
+and the interception itself is a censorship signal.
+
+### 17.5 Server listeners, and sharing :443 with a panel
+
+Both listeners share the *exact* transport-agnostic packet handler used by
+UDP/TCP, so no tunnel logic is duplicated. DoT additionally reuses the TCP accept
+loop (`serveDNSOverStream`), inheriting its framing, per-IP caps and load shedding
+unchanged — it is "TCP/53 in a TLS coat" as far as the server is concerned.
+
+TLS material resolves **cert/key → ACME → self-signed**, so an enabled listener
+always comes up. ACME is wrapped so an issuance/renewal failure at handshake time
+falls back to the generated certificate instead of dropping encrypted DNS.
+
+Only one process can bind :443, which matters when a panel (3x-ui, Hiddify, …) is
+on the box. `DOH_COEXIST_MODE` picks the model:
+
+- **`auto` (default) → model A.** CottenDNS **never binds the TLS port at all**.
+  It serves cleartext HTTP/1.1+h2c on `DOH_BEHIND_PORT`, and the panel's own front
+  (Xray fallback / nginx / Caddy) forwards the DoH route in. Because the panel
+  still owns the handshake, every inbound it supports keeps working untouched —
+  VMess/VLESS/Trojan, xhttp/gRPC/raw/ws/tls, CDN-fronted. WireGuard is UDP and is
+  unaffected either way.
+- **`front` → model B.** CottenDNS owns :443, terminates TLS, and SNI-splices
+  every connection that is not for `DOMAIN` to `DOH_SHARE_BACKEND` untouched.
+
+`auto` resolves to A deliberately: model B would opportunistically claim :443, and
+then a panel installed *later* would fail to bind it. Owning the port is therefore
+always an explicit decision, never a default. The SNI router carries the same
+bias — a ClientHello it cannot parse is forwarded to the backend rather than
+swallowed, so a detection bug never takes 443 from the co-hosted service.
+
+### 17.6 Not letting the disguise starve the survival path
+
+DoT/DoH are optional extras; DNS-over-TCP/53 is the fallback the tunnel depends
+on. Sharing one connection budget between them would let a flood of the optional
+listeners consume the headroom the survival path needs.
+
+`connectionBudget` therefore supports a **parent** link: DoT/DoH reserve from a
+child budget capped at `ENCRYPTED_MAX_CONNS` (default ¾ of `TCP_MAX_CONNS`) whose
+reservations also consume parent capacity. However hard the encrypted listeners
+are flooded, the remaining quarter stays available for plain TCP/53. UDP/53 is a
+separate path and is unaffected by any of these budgets.
+
+DoH additionally carries its own request-rate, in-flight and byte ceilings, plus
+trusted-proxy handling: behind a reverse proxy the rate limiter keys on the
+*forwarded* client address, and the per-IP **connection** cap is disabled, since
+otherwise every user would share the proxy's single ceiling.
+
+### 17.7 Why it helps
+
+On a network that fingerprints plaintext 53, the tunnel stops looking like a DNS
+anomaly and starts looking like a phone using Cloudflare — while the fallback
+chain guarantees that turning the disguise on can never leave a user worse off
+than before.
+
+---
+
 *All changes keep ARQ as the correctness backstop; every optimization above is
 designed to fail safe — if FEC, MTU grouping, or a transport channel does not
 help on a given path, the tunnel still delivers via ARQ over the surviving
 resolvers.*
-</content>

@@ -35,6 +35,8 @@ Typical deployment is straightforward: run the server on a VPS with UDP/53 reach
 
 Recent work focused on staying usable on highly restrictive, lossy networks:
 
+- **DNS-over-TLS and DNS-over-HTTPS.** `RESOLVER_TRANSPORT = dot | doh` encrypts the client→resolver hop, so on networks that fingerprint plaintext DNS on 53 the tunnel looks like a device using an encrypted DNS provider. **A public resolver needs no server change at all** — keep the resolver IPs you already use (`1.1.1.1`, `8.8.8.8`, `9.9.9.9`); the encryption covers exactly the hop that gets fingerprinted, and the resolver still reaches your server through the normal delegation. Strictly opt-in (`auto` never escalates into them) and never a one-way door: if the TLS port is blocked the client falls back to **UDP → TCP/53** by itself. Verify-by-default, with SPKI pinning (`RESOLVER_TLS_PIN`) for a self-signed server. Details: [Engineering Notes §17](docs/ENGINEERING_CHANGES.md).
+- **Optional DoT/DoH server listeners that can share :443.** Only needed to point clients *directly* at this server. They reuse the same transport-agnostic packet handler as UDP/TCP, and TLS material resolves cert/key → ACME → self-signed so an enabled listener always comes up. `DOH_COEXIST_MODE` defaults to **never binding :443**, so a co-hosted panel (3x-ui, Hiddify, …) keeps the port and every inbound it supports — VMess/VLESS/Trojan, xhttp/gRPC/raw/ws/tls, CDN-fronted — keeps working untouched; taking the port is always an explicit choice. Both listeners off by default, and they draw from a capped connection sub-budget so flooding them can never starve the plain TCP/53 survival path.
 - **DNS-over-TCP/53 fallback.** The server serves both UDP/53 and TCP/53 on the same port, and the client (`RESOLVER_TRANSPORT = auto`) probes over UDP first, then transparently re-probes the **whole fleet over TCP/53** if UDP finds no resolvers — surviving networks that filter or truncate UDP/53. Zero cost when UDP works. Every response channel (TXT/CNAME/A/NULL/HTTPS) works over TCP too.
 - **TCP survival-path guardrails.** TCP/53 is treated as a first-class fallback path: per-IP connection caps, optional per-connection query limits, read-idle timeouts, and write deadlines protect the listener while keeping persistent DNS-over-TCP useful.
 - **Paired config presets.** Bundled client/server pairs (`speed`, `survival`, `tcp-survival`) tune both sides together through `CONFIG_PRESET`, while explicit TOML/CLI values still override the profile.
@@ -444,6 +446,50 @@ With `ENCRYPTION_AUTO_DETECT = true` (server default) the server builds a codec 
 | DNS query shaping | `DNS_RANDOMIZE_QUERY_ID`, `DNS_EDNS_COOKIE`, `DNS_QNAME_CASE_RANDOMIZATION`, `EDNS_UDP_SIZE` (client) | Randomizes transaction IDs, can add EDNS client cookies, optionally applies 0x20 mixed-case QNAMEs, and controls advertised EDNS UDP size. Server-transparent. |
 | Injection hardening | `RESOLVER_IGNORE_INJECTED_NXDOMAIN` (client) | Ignores forged payloadless NXDOMAIN responses for resolver scoring so a censor cannot cheaply disable working resolvers. |
 | Domain-diverse duplication | `DUPLICATION_PREFER_DISTINCT_DOMAINS` (client) | Sends the duplicate copies of a packet across distinct tunnel domains where possible, for independent delivery paths and spread query volume. No effect with a single domain or duplication count `1`. |
+
+### 🔐 Encrypted Resolver Transports (DoT / DoH)
+
+Encrypts the **client → resolver** hop so the tunnel looks like ordinary encrypted
+DNS. Opt-in; `auto` never turns these on by itself.
+
+**Using a public resolver — no server change, no redeploy.** Keep the resolver
+list you already have and switch one key. There is no separate "DoH URL" to add:
+the endpoint is built from each resolver IP plus the transport's port and path.
+
+```toml
+# client_config.toml
+RESOLVER_TRANSPORT = "doh"      # or "dot"
+```
+```text
+# client_resolvers.txt — unchanged, still one IP per line
+1.1.1.1
+1.0.0.1
+```
+The resolver then reaches your tunnel server through the normal NS delegation,
+exactly as it does over plain UDP/53. Cloudflare (`1.1.1.1`, `1.0.0.1`), Google
+(`8.8.8.8`, `8.8.4.4`) and Quad9 (`9.9.9.9`) publish certificates carrying their
+**IP as a SAN**, so they validate with no extra configuration and can be mixed
+freely (all use `/dns-query` on 443).
+
+**If the encrypted port is blocked**, the client falls back to **UDP → TCP/53** on
+its own, so enabling this can never leave you worse off than before.
+
+| Key (client) | Default | Purpose |
+| --- | --- | --- |
+| `RESOLVER_TRANSPORT` | `auto` | `auto` \| `udp` \| `tcp` \| `dot` \| `doh` |
+| `RESOLVER_TLS_SERVER_NAME` | *(empty)* | SNI/cert name. **Leave empty for public resolvers**; set it only when pointing at your own DoT/DoH server. |
+| `RESOLVER_TLS_PIN` | *(empty)* | Base64 SHA-256 of the server certificate's SubjectPublicKeyInfo. Replaces CA validation — the right way to trust a **self-signed** server. Survives certificate renewal. |
+| `RESOLVER_TLS_INSECURE_SKIP_VERIFY` | `false` | Last resort. The payload stays AEAD-encrypted either way, but an unverified hop can be silently intercepted. |
+| `RESOLVER_DOT_PORT` / `RESOLVER_DOH_PORT` / `RESOLVER_DOH_PATH` | `853` / `443` / `/dns-query` | Where the resolver IP is contacted. |
+
+> **Limits.** The transport and its port/path are **client-wide, not per-resolver**:
+> you cannot run one resolver over DoH while another stays on UDP, and a provider
+> using a different path needs its own profile. Resolver entries are IPs, not
+> hostnames.
+
+To point clients **directly at this server** instead of a public resolver, enable
+`DOT_LISTENER_ENABLED` / `DOH_LISTENER_ENABLED` server-side — see
+[Server Setup](#server-setup) and [Engineering Notes §17](docs/ENGINEERING_CHANGES.md).
 
 ### 📦 Compression Methods
 
