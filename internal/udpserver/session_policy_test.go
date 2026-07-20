@@ -7,7 +7,40 @@
 
 package udpserver
 
-import "testing"
+import (
+	"testing"
+
+	"cottendns-go/internal/config"
+)
+
+// The guarantee that protects every existing CottenDns deployment: a server
+// that was never configured with ceilings must produce an empty policy, which
+// means no policy block is appended and SESSION_ACCEPT stays byte-for-byte what
+// it always was. If this fails, upgrading silently changes the wire.
+func TestUnconfiguredServerAdvertisesNoPolicy(t *testing.T) {
+	var cfg config.ServerConfig
+
+	if policy := buildClientPolicy(cfg); !policy.IsZero() {
+		t.Fatalf("a zero-value server config produced a policy: %+v", policy)
+	}
+}
+
+// A single configured ceiling must produce a policy carrying that one field and
+// nothing else, so operators can enable one limit without implying others.
+func TestSingleCeilingProducesMinimalPolicy(t *testing.T) {
+	cfg := config.ServerConfig{MaxAllowedClientARQWindowSize: 2000}
+
+	policy := buildClientPolicy(cfg)
+	if policy.IsZero() {
+		t.Fatal("a configured ceiling produced no policy")
+	}
+	if policy.MaxARQWindowSize != 2000 {
+		t.Fatalf("ARQ window ceiling = %d, want 2000", policy.MaxARQWindowSize)
+	}
+	if policy.MaxPacketsPerBatch != 0 || policy.MaxDownloadMTU != 0 || policy.MinCompressionMinSize != 0 {
+		t.Fatalf("unset ceilings leaked non-zero values: %+v", policy)
+	}
+}
 
 // The MTU ceilings must bind a client that never reads the advertised policy --
 // an older CottenDns client, a MasterDNS client that ignores it, or a modified

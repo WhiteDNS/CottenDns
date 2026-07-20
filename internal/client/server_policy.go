@@ -93,6 +93,52 @@ func (c *Client) effectiveARQWindowSize() int {
 	return c.cfg.ARQWindowSize
 }
 
+// effectiveARQDataNackMaxGap is the NACK scan span after any server ceiling,
+// and after re-establishing the invariant config enforces at load time: the gap
+// stays at or below a quarter of the window.
+//
+// That re-clamp is the point of this function. Config sizes the gap against the
+// *configured* window, so a server ceiling that shrinks the effective window
+// would otherwise leave a gap as wide as the whole window. The NACK scan spans
+// dataNackMaxGap sequence numbers, so that would make the client NACK far more
+// aggressively than it was tuned to -- more control traffic, aimed at the very
+// server that just asked it to use less.
+func (c *Client) effectiveARQDataNackMaxGap() int {
+	gap := c.cfg.ARQDataNackMaxGap
+	if policy := c.serverPolicySnapshot(); policy != nil {
+		gap = policyMaxInt(gap, policy.MaxARQDataNackMaxGap)
+	}
+
+	if window := c.effectiveARQWindowSize(); window > 0 && gap > window/4 {
+		gap = window / 4
+	}
+	return gap
+}
+
+// effectiveARQInitialRTO is the initial retransmit timeout after any server
+// floor. A floor stops a client retransmitting so eagerly that it multiplies
+// the query volume the server sees on a merely slow link.
+func (c *Client) effectiveARQInitialRTO() float64 {
+	policy := c.serverPolicySnapshot()
+	if policy == nil || policy.MinARQInitialRTOSeconds <= 0 {
+		return c.cfg.ARQInitialRTOSeconds
+	}
+
+	rto := c.cfg.ARQInitialRTOSeconds
+	if rto < policy.MinARQInitialRTOSeconds {
+		rto = policy.MinARQInitialRTOSeconds
+	}
+
+	// Never raise the initial RTO above the backoff ceiling. ARQ_MAX_RTO_SECONDS
+	// may legitimately sit below one second, while the policy floor can reach
+	// one second, so an unguarded floor could invert the two and start a stream
+	// already past its own maximum.
+	if c.cfg.ARQMaxRTOSeconds > 0 && rto > c.cfg.ARQMaxRTOSeconds {
+		return c.cfg.ARQMaxRTOSeconds
+	}
+	return rto
+}
+
 // effectiveMaxPacketsPerBatch is the batch size after any server ceiling. The
 // server performs the batching work, so it gets a say in the size.
 func (c *Client) effectiveMaxPacketsPerBatch() int {
