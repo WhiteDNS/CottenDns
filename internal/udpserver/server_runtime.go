@@ -27,20 +27,60 @@ func (s *Server) configureSocketBuffers(conn *net.UDPConn) {
 	}
 }
 
-func (s *Server) startDNSWorkers(ctx context.Context, conn *net.UDPConn, reqCh <-chan request, workerWG *sync.WaitGroup) {
+func (s *Server) startDNSWorkers(ctx context.Context, reqCh <-chan request, workerWG *sync.WaitGroup) {
 	for i := range s.cfg.DNSRequestWorkers {
 		workerWG.Add(1)
 		go func(workerID int) {
 			defer workerWG.Done()
-			s.dnsWorker(ctx, conn, reqCh, workerID)
+			s.dnsWorker(ctx, reqCh, workerID)
 		}(i + 1)
 	}
 }
 
-func (s *Server) startReaders(ctx context.Context, conn *net.UDPConn, reqCh chan<- request, readErrCh chan<- error, readerWG *sync.WaitGroup) {
+// listenUDP opens the listening sockets. With SO_REUSEPORT available it opens
+// one per reader so each gets its own kernel receive queue; otherwise, or if
+// opening the full set fails for any reason, it returns a single shared socket
+// and every reader takes turns on it (the behaviour that shipped before).
+// Partial sets are never returned: an unbalanced set would leave some readers
+// contending while others run free, so anything short of the full count is torn
+// down in favour of the predictable single-socket path.
+func (s *Server) listenUDP(addr *net.UDPAddr) ([]*net.UDPConn, error) {
+	readers := s.cfg.UDPReaders
+	if reusePortSupported && readers > 1 {
+		conns := make([]*net.UDPConn, 0, readers)
+		for range readers {
+			conn, err := listenUDPReusePort(addr)
+			if err != nil {
+				for _, opened := range conns {
+					_ = opened.Close()
+				}
+				conns = nil
+				break
+			}
+			conns = append(conns, conn)
+		}
+		if len(conns) == readers {
+			return conns, nil
+		}
+		if s.log != nil {
+			s.log.Warnf("\U0001F4E1 <yellow>SO_REUSEPORT Unavailable, Falling Back To A Single Shared Socket</yellow>")
+		}
+	}
+
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return []*net.UDPConn{conn}, nil
+}
+
+// startReaders runs one reader per socket when SO_REUSEPORT gave us a socket
+// each, and otherwise fans every reader onto the single shared socket.
+func (s *Server) startReaders(ctx context.Context, conns []*net.UDPConn, reqCh chan<- request, readErrCh chan<- error, readerWG *sync.WaitGroup) {
 	for i := range s.cfg.UDPReaders {
+		conn := conns[i%len(conns)]
 		readerWG.Add(1)
-		go func(readerID int) {
+		go func(readerID int, conn *net.UDPConn) {
 			defer readerWG.Done()
 			if err := s.readLoop(ctx, conn, reqCh, readerID); err != nil {
 				select {
@@ -48,7 +88,7 @@ func (s *Server) startReaders(ctx context.Context, conn *net.UDPConn, reqCh chan
 				default:
 				}
 			}
-		}(i + 1)
+		}(i+1, conn)
 	}
 }
 
@@ -172,7 +212,7 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, reqCh chan<- r
 		}
 
 		select {
-		case reqCh <- request{buf: buffer, size: n, addr: addr}:
+		case reqCh <- request{buf: buffer, size: n, addr: addr, conn: conn}:
 		case <-ctx.Done():
 			s.packetPool.Put(buffer)
 			return nil
@@ -183,7 +223,7 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, reqCh chan<- r
 	}
 }
 
-func (s *Server) dnsWorker(ctx context.Context, conn *net.UDPConn, reqCh <-chan request, workerID int) {
+func (s *Server) dnsWorker(ctx context.Context, reqCh <-chan request, workerID int) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -195,7 +235,7 @@ func (s *Server) dnsWorker(ctx context.Context, conn *net.UDPConn, reqCh <-chan 
 
 			response := s.safeHandlePacket(req.buf[:req.size])
 			if len(response) != 0 {
-				if _, err := conn.WriteToUDP(response, req.addr); err != nil {
+				if _, err := req.conn.WriteToUDP(response, req.addr); err != nil {
 					s.log.Debugf(
 						"\U0001F4A5 <yellow>UDP Write Error, Worker: <cyan>%d</cyan>, Remote: <cyan>%v</cyan>, Error: <cyan>%v</cyan></yellow>",
 						workerID,

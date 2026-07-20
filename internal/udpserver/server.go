@@ -10,6 +10,7 @@ package udpserver
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"strconv"
 	"sync"
@@ -185,7 +186,15 @@ type request struct {
 	buf  []byte
 	size int
 	addr *net.UDPAddr
+	// conn is the socket the datagram arrived on, so the reply leaves by the
+	// same one. With SO_REUSEPORT every socket shares the listen address, so
+	// this is transmit-load spreading rather than a correctness requirement.
+	conn *net.UDPConn
 }
+
+// errReusePortUnsupported reports that SO_REUSEPORT is unavailable, so the
+// caller should fall back to a single shared listening socket.
+var errReusePortUnsupported = errors.New("SO_REUSEPORT not supported on this platform")
 
 type postSessionValidation struct {
 	record   *sessionRuntimeView
@@ -419,7 +428,7 @@ func (s *Server) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{
+	conns, err := s.listenUDP(&net.UDPAddr{
 		IP:   net.ParseIP(s.cfg.UDPHost),
 		Port: s.cfg.UDPPort,
 	})
@@ -428,14 +437,21 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 
-	defer conn.Close()
+	defer func() {
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	}()
 
-	s.configureSocketBuffers(conn)
+	for _, conn := range conns {
+		s.configureSocketBuffers(conn)
+	}
 
 	queueCapacity := s.ingressQueueCapacity()
 	s.log.Infof(
-		"\U0001F4E1 <green>UDP Listener Ready, Addr: <cyan>%s</cyan>, Readers: <cyan>%d</cyan>, Workers: <cyan>%d</cyan>, Queue: <cyan>%d</cyan> <gray>(memory cap %d bytes)</gray></green>",
+		"\U0001F4E1 <green>UDP Listener Ready, Addr: <cyan>%s</cyan>, Sockets: <cyan>%d</cyan>, Readers: <cyan>%d</cyan>, Workers: <cyan>%d</cyan>, Queue: <cyan>%d</cyan> <gray>(memory cap %d bytes)</gray></green>",
 		s.cfg.Address(),
+		len(conns),
 		s.cfg.UDPReaders,
 		s.cfg.DNSRequestWorkers,
 		queueCapacity,
@@ -453,7 +469,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	s.deferredDNSSession.Start(runCtx)
 	s.deferredConnectSession.Start(runCtx)
-	s.startDNSWorkers(runCtx, conn, reqCh, &workerWG)
+	s.startDNSWorkers(runCtx, reqCh, &workerWG)
 
 	// DNS-over-TCP fallback on the same host:port, for clients on networks that
 	// filter or truncate UDP/53. Shares the transport-agnostic packet handler.
@@ -509,12 +525,14 @@ func (s *Server) Run(ctx context.Context) error {
 
 	go func() {
 		<-runCtx.Done()
-		_ = conn.Close()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
 	}()
 
 	readErrCh := make(chan error, s.cfg.UDPReaders)
 	var readerWG sync.WaitGroup
-	s.startReaders(runCtx, conn, reqCh, readErrCh, &readerWG)
+	s.startReaders(runCtx, conns, reqCh, readErrCh, &readerWG)
 
 	readerWG.Wait()
 	close(reqCh)
