@@ -59,14 +59,14 @@ func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName st
 		mode := s.nextUnknownInvalidDropMode()
 		s.logInvalidSessionDrop("unknown session", vpnPacket.SessionID, vpnPacket.SessionCookie, 0, mode)
 		return postSessionValidation{
-			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, mode),
+			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, mode, vpnPacket.LegacySessionID),
 		}
 	}
 
 	if validation.Lookup.State == sessionLookupClosed {
 		s.logInvalidSessionDrop("recently closed session", vpnPacket.SessionID, vpnPacket.SessionCookie, validation.Lookup.Cookie, validation.Lookup.ResponseMode)
 		return postSessionValidation{
-			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode),
+			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID),
 		}
 	}
 
@@ -85,7 +85,7 @@ func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName st
 	s.logInvalidSessionDrop("invalid cookie threshold", vpnPacket.SessionID, vpnPacket.SessionCookie, validation.Lookup.Cookie, validation.Lookup.ResponseMode)
 
 	return postSessionValidation{
-		response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode),
+		response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID),
 	}
 }
 
@@ -155,12 +155,16 @@ func invalidSessionDropLogConfig(reason string, sessionID uint16, receivedCookie
 	}
 }
 
-func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint16, responseMode uint8) []byte {
+// legacy selects the reply's wire format. There is no session record to consult
+// here (the whole point is that the session is unknown, closed, or failed its
+// cookie), so it comes from the format the rejected request itself arrived in.
+func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint16, responseMode uint8, legacy bool) []byte {
 	payload := s.nextInvalidDropPayload()
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
-		SessionID:  sessionID,
-		PacketType: Enums.PACKET_ERROR_DROP,
-		Payload:    payload[:],
+		SessionID:       sessionID,
+		PacketType:      Enums.PACKET_ERROR_DROP,
+		Payload:         payload[:],
+		LegacySessionID: legacy,
 	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
@@ -168,16 +172,17 @@ func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, request
 	return response
 }
 
-func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName string, responseMode uint8, verifyCode []byte) []byte {
+func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName string, responseMode uint8, verifyCode []byte, legacy bool) []byte {
 	if len(verifyCode) < mtuProbeCodeLength {
 		return nil
 	}
 	var payload [mtuProbeCodeLength]byte
 	copy(payload[:], verifyCode[:mtuProbeCodeLength])
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
-		SessionID:  0,
-		PacketType: Enums.PACKET_SESSION_BUSY,
-		Payload:    payload[:],
+		SessionID:       0,
+		PacketType:      Enums.PACKET_SESSION_BUSY,
+		Payload:         payload[:],
+		LegacySessionID: legacy,
 	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
@@ -191,6 +196,10 @@ func (s *Server) buildSessionVPNResponse(questionPacket []byte, requestName stri
 	}
 	packet.SessionID = record.ID
 	packet.SessionCookie = record.Cookie
+	// Single chokepoint for session-scoped replies: whatever built the packet
+	// upstream (pong, queued data, ack, packed control blocks), it goes back in
+	// the wire format this session was opened with.
+	packet.LegacySessionID = record.LegacySessionID
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
@@ -815,6 +824,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		resolvedUpload,
 		resolvedDownload,
 		s.cfg.MaxPacketsPerBatch,
+		vpnPacket.LegacySessionID,
 	)
 	if err != nil {
 		if err == ErrSessionTableFull {
@@ -824,7 +834,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 					decision.RequestName,
 				)
 			}
-			return s.buildSessionBusyResponse(questionPacket, decision.RequestName, vpnPacket.Payload[0], vpnPacket.Payload[6:10])
+			return s.buildSessionBusyResponse(questionPacket, decision.RequestName, vpnPacket.Payload[0], vpnPacket.Payload[6:10], vpnPacket.LegacySessionID)
 		}
 		return nil
 	}
@@ -846,17 +856,28 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		)
 	}
 
+	// The accept payload carries the assigned session ID at the same width as
+	// the header, so the whole layout shifts down a byte for legacy clients:
+	// [sid(1|2)] [cookie] [compression] [verifyCode(4)].
 	var responsePayload [sessionAcceptSize]byte
-	responsePayload[0] = byte(record.ID >> 8)
-	responsePayload[1] = byte(record.ID)
-	responsePayload[2] = record.Cookie
-	responsePayload[3] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
-	copy(responsePayload[4:], record.VerifyCode[:])
+	offset := 0
+	if record.LegacySessionID {
+		responsePayload[0] = byte(record.ID)
+		offset = 1
+	} else {
+		responsePayload[0] = byte(record.ID >> 8)
+		responsePayload[1] = byte(record.ID)
+		offset = 2
+	}
+	responsePayload[offset] = record.Cookie
+	responsePayload[offset+1] = compression.PackPair(record.UploadCompression, record.DownloadCompression)
+	copy(responsePayload[offset+2:], record.VerifyCode[:])
 
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
-		SessionID:  0,
-		PacketType: Enums.PACKET_SESSION_ACCEPT,
-		Payload:    responsePayload[:],
+		SessionID:       0,
+		PacketType:      Enums.PACKET_SESSION_ACCEPT,
+		Payload:         responsePayload[:offset+2+len(record.VerifyCode)],
+		LegacySessionID: record.LegacySessionID,
 	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil
@@ -887,9 +908,10 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 	// response is small, so it encodes cleanly as CNAME when the query was
 	// non-TXT, and its size does not affect upload-MTU measurement.
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
-		SessionID:  vpnPacket.SessionID,
-		PacketType: Enums.PACKET_MTU_UP_RES,
-		Payload:    responsePayload[:],
+		SessionID:       vpnPacket.SessionID,
+		PacketType:      Enums.PACKET_MTU_UP_RES,
+		Payload:         responsePayload[:],
+		LegacySessionID: vpnPacket.LegacySessionID,
 	}, baseEncode, s.cfg.ARecordDataDelivery)
 
 	if err != nil {
@@ -927,13 +949,14 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 	// builder, so the download-capacity ceiling is still measured on the TXT
 	// channel that bulk data actually uses; smaller sizes match the query type.
 	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
-		SessionID:      vpnPacket.SessionID,
-		PacketType:     Enums.PACKET_MTU_DOWN_RES,
-		StreamID:       vpnPacket.StreamID,
-		SequenceNum:    vpnPacket.SequenceNum,
-		FragmentID:     vpnPacket.FragmentID,
-		TotalFragments: vpnPacket.TotalFragments,
-		Payload:        payload,
+		SessionID:       vpnPacket.SessionID,
+		PacketType:      Enums.PACKET_MTU_DOWN_RES,
+		StreamID:        vpnPacket.StreamID,
+		SequenceNum:     vpnPacket.SequenceNum,
+		FragmentID:      vpnPacket.FragmentID,
+		TotalFragments:  vpnPacket.TotalFragments,
+		Payload:         payload,
+		LegacySessionID: vpnPacket.LegacySessionID,
 	}, baseEncode, s.cfg.ARecordDataDelivery)
 	if err != nil {
 		return nil

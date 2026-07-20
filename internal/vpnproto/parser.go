@@ -40,8 +40,8 @@ var packetFlags = buildPacketFlags()
 // `total_data_length` has been removed from the fragment extension.
 //
 // Base header:
-//   [0] Session ID     (1 byte)
-//   [1] Packet Type    (1 byte)
+//   [0..1] Session ID   (2 bytes; 1 byte in legacy mode, see LegacySessionID)
+//   [+1]   Packet Type  (1 byte)
 //
 // Optional extensions by packet type:
 //   Stream extension:
@@ -64,6 +64,13 @@ type Packet struct {
 	SessionID     uint16
 	PacketType    uint8
 	SessionCookie uint8
+
+	// LegacySessionID reports that this packet's session ID occupies a single
+	// header byte, the format spoken by the MasterDNS/StormDNS/WhiteDNS
+	// lineage CottenDns forked from. It is set by the parser on ingress and
+	// copied into BuildOptions on egress so a reply goes back in the same
+	// wire format the request arrived in.
+	LegacySessionID bool
 
 	HasStreamID bool
 	StreamID    uint16
@@ -109,20 +116,61 @@ func ParseAtOffset(data []byte, offset int) (Packet, error) {
 	return parseFrom(data, offset)
 }
 
+// parseFrom decodes a frame in either wire format. Native CottenDns spends two
+// header bytes on the session ID; the MasterDNS/StormDNS lineage spends one.
+// Nothing on the wire flags which is which, so the native layout is tried first
+// and the legacy layout only as a fallback.
+//
+// Ambiguity is contained by the session-ID range split the server allocator
+// enforces (legacy sessions get 1..255, native sessions 256..65535): a legacy
+// frame read as native yields either a sub-256 ID or, for SESSION_INIT, a
+// non-zero one, both of which are impossible for a real native frame. What
+// survives that plus the header check byte is caught downstream by the session
+// cookie, so a mis-parse costs a dropped packet ARQ retransmits, never a packet
+// delivered into the wrong session.
 func parseFrom(data []byte, start int) (Packet, error) {
+	packet, err := parseWidth(data, start, 2)
+	if err == nil && plausibleNativeSessionID(packet) {
+		return packet, nil
+	}
+
+	legacy, legacyErr := parseWidth(data, start, 1)
+	if legacyErr == nil && legacy.SessionID <= maxLegacySessionID {
+		return legacy, nil
+	}
+
+	if err != nil {
+		return Packet{}, err
+	}
+	return packet, nil
+}
+
+// plausibleNativeSessionID rejects the session IDs a genuine native frame can
+// never carry, so those frames fall through to the legacy layout instead of
+// being accepted with a corrupted header. SESSION_INIT is sent before an ID
+// exists and so must be exactly zero; every established native session sits
+// above the legacy range by allocator construction.
+func plausibleNativeSessionID(packet Packet) bool {
+	if packet.PacketType == Enums.PACKET_SESSION_INIT {
+		return packet.SessionID == 0
+	}
+	return packet.SessionID == 0 || packet.SessionID > maxLegacySessionID
+}
+
+func parseWidth(data []byte, start int, sessionIDLen int) (Packet, error) {
 	data = data[start:]
-	if len(data) < minHeaderLength {
+	if len(data) < sessionIDLen+1+integrityLength {
 		return Packet{}, ErrPacketTooShort
 	}
 
-	packetType := data[2]
+	packetType := data[sessionIDLen]
 	flags := packetFlags[packetType]
 	if flags&packetFlagValid == 0 {
 		return Packet{}, ErrInvalidPacketType
 	}
 
 	// Fast-path length check
-	minLen := 3 + integrityLength
+	minLen := sessionIDLen + 1 + integrityLength
 	if flags&packetFlagStream != 0 {
 		minLen += 2
 	}
@@ -141,11 +189,12 @@ func parseFrom(data []byte, start int) (Packet, error) {
 	}
 
 	packet := Packet{
-		SessionID:  (uint16(data[0]) << 8) | uint16(data[1]),
-		PacketType: packetType,
+		SessionID:       readSessionID(data, sessionIDLen),
+		PacketType:      packetType,
+		LegacySessionID: sessionIDLen == 1,
 	}
 
-	offset := 3
+	offset := sessionIDLen + 1
 	if flags&packetFlagStream != 0 {
 		packet.HasStreamID = true
 		packet.StreamID = (uint16(data[offset]) << 8) | uint16(data[offset+1])
