@@ -120,6 +120,82 @@ func TestUnstatedPolicyFieldsAreNotTreatedAsZeroLimits(t *testing.T) {
 	}
 }
 
+// Config sizes the NACK gap against the configured window (gap <= window/4). A
+// server ceiling shrinks the effective window, so without a re-clamp the gap
+// could end up as wide as the whole window -- making the client NACK far more
+// aggressively than it was tuned to, aimed at the server that just asked it to
+// use less. The invariant must hold against the effective window.
+func TestARQNackGapStaysProportionalToClampedWindow(t *testing.T) {
+	c := policyTestClient(config.ClientConfig{
+		ARQWindowSize:        8000,
+		ARQDataNackMaxGap:    2000, // a quarter of the configured window
+		ARQMaxRTOSeconds:     8.0,
+		ARQInitialRTOSeconds: 0.2,
+	})
+
+	policy := VpnProto.SessionAcceptClientPolicy{MaxARQWindowSize: 2000}
+	c.serverPolicy.Store(&policy)
+
+	window := c.effectiveARQWindowSize()
+	if window != 2000 {
+		t.Fatalf("window = %d, want the clamped 2000", window)
+	}
+	if gap := c.effectiveARQDataNackMaxGap(); gap > window/4 {
+		t.Fatalf("NACK gap %d exceeds a quarter of the effective window %d", gap, window)
+	}
+}
+
+// The policy's own NACK-gap ceiling must be honoured too.
+func TestARQNackGapHonoursServerCeiling(t *testing.T) {
+	c := policyTestClient(config.ClientConfig{
+		ARQWindowSize:     8000,
+		ARQDataNackMaxGap: 2000,
+	})
+
+	policy := VpnProto.SessionAcceptClientPolicy{MaxARQDataNackMaxGap: 64}
+	c.serverPolicy.Store(&policy)
+
+	if gap := c.effectiveARQDataNackMaxGap(); gap != 64 {
+		t.Fatalf("NACK gap = %d, want the server's 64", gap)
+	}
+}
+
+// ARQ_MAX_RTO_SECONDS may sit below one second while the policy floor reaches
+// one second. The floor must never start a stream already past its own backoff
+// ceiling.
+func TestARQInitialRTONeverExceedsMaxRTO(t *testing.T) {
+	c := policyTestClient(config.ClientConfig{
+		ARQInitialRTOSeconds: 0.1,
+		ARQMaxRTOSeconds:     0.5,
+	})
+
+	policy := VpnProto.SessionAcceptClientPolicy{MinARQInitialRTOSeconds: 1.0}
+	c.serverPolicy.Store(&policy)
+
+	rto := c.effectiveARQInitialRTO()
+	if rto > c.cfg.ARQMaxRTOSeconds {
+		t.Fatalf("initial RTO %v exceeds max RTO %v", rto, c.cfg.ARQMaxRTOSeconds)
+	}
+}
+
+// Without a policy the ARQ values must be exactly what was configured, so an
+// unconfigured server leaves ARQ tuning untouched.
+func TestARQValuesUnchangedWithoutPolicy(t *testing.T) {
+	c := policyTestClient(config.ClientConfig{
+		ARQWindowSize:        2000,
+		ARQDataNackMaxGap:    500,
+		ARQInitialRTOSeconds: 0.2,
+		ARQMaxRTOSeconds:     8.0,
+	})
+
+	if got := c.effectiveARQDataNackMaxGap(); got != 500 {
+		t.Fatalf("NACK gap = %d, want the configured 500", got)
+	}
+	if got := c.effectiveARQInitialRTO(); got != 0.2 {
+		t.Fatalf("initial RTO = %v, want the configured 0.2", got)
+	}
+}
+
 // The end-to-end client path: a real accept payload carrying a policy must be
 // picked up, and one without a policy must leave the client unconstrained.
 func TestApplyServerClientPolicyFromAcceptPayload(t *testing.T) {
