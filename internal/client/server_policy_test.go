@@ -196,6 +196,69 @@ func TestARQValuesUnchangedWithoutPolicy(t *testing.T) {
 	}
 }
 
+// Sessions are re-established over a client's lifetime. If an operator removes
+// the ceilings and restarts, the next accept carries no policy and the client
+// must actually become unclamped again -- keeping the last one would leave it
+// throttled forever against a server that no longer asks for it.
+func TestPolicyIsClearedWhenServerStopsAdvertisingIt(t *testing.T) {
+	verify := [4]byte{1, 2, 3, 4}
+	c := policyTestClient(config.ClientConfig{ARQWindowSize: 4096})
+
+	withPolicy := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify,
+		VpnProto.SessionAcceptClientPolicy{MaxARQWindowSize: 512}, false)
+	c.applyServerClientPolicy(withPolicy)
+	if got := c.effectiveARQWindowSize(); got != 512 {
+		t.Fatalf("ARQ window = %d, want the advertised 512", got)
+	}
+
+	// Server restarts without ceilings; the client re-inits.
+	bare := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify, VpnProto.SessionAcceptClientPolicy{}, false)
+	c.applyServerClientPolicy(bare)
+
+	if got := c.effectiveARQWindowSize(); got != 4096 {
+		t.Fatalf("ARQ window = %d, want the configured 4096 back once the policy was withdrawn", got)
+	}
+	if c.serverPolicySnapshot() != nil {
+		t.Fatal("a withdrawn policy is still being held")
+	}
+}
+
+// The two sub-second fields cannot encode "unset": byte 0 decodes to 0.05, not
+// to zero. That is only harmless because config clamps both corresponding knobs
+// to a minimum of exactly 0.05, so the implied floor can never bind. Pin that
+// relationship -- if either clamp is ever loosened below 0.05, setting any
+// single unrelated ceiling would start silently raising these two.
+func TestScaledPolicyFloorsCannotBindADefaultClient(t *testing.T) {
+	// A server that configured only an unrelated ceiling.
+	block := VpnProto.EncodeSessionAcceptClientPolicy(VpnProto.SessionAcceptClientPolicy{
+		MaxARQWindowSize: 2000,
+	})
+	decoded, err := VpnProto.DecodeSessionAcceptClientPolicy(block[:])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Both scaled fields come back as the range minimum rather than zero.
+	if decoded.MinPingAggressiveInterval > 0.05 {
+		t.Fatalf("implied ping floor %v exceeds the config minimum 0.05", decoded.MinPingAggressiveInterval)
+	}
+	if decoded.MinARQInitialRTOSeconds > 0.05 {
+		t.Fatalf("implied RTO floor %v exceeds the config minimum 0.05", decoded.MinARQInitialRTOSeconds)
+	}
+
+	// A client at the config minimum must therefore be left exactly alone.
+	cfg := config.ClientConfig{PingAggressiveIntervalSeconds: 0.05, ARQInitialRTOSeconds: 0.05, ARQMaxRTOSeconds: 8.0}
+	c := policyTestClient(cfg)
+	c.serverPolicy.Store(&decoded)
+
+	if got := c.effectivePingAggressiveInterval(); got != cfg.PingAggressiveInterval() {
+		t.Fatalf("ping interval = %v, want the configured %v", got, cfg.PingAggressiveInterval())
+	}
+	if got := c.effectiveARQInitialRTO(); got != 0.05 {
+		t.Fatalf("initial RTO = %v, want the configured 0.05", got)
+	}
+}
+
 // The end-to-end client path: a real accept payload carrying a policy must be
 // picked up, and one without a policy must leave the client unconstrained.
 func TestApplyServerClientPolicyFromAcceptPayload(t *testing.T) {

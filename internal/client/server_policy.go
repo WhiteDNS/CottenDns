@@ -41,6 +41,12 @@ func (c *Client) applyServerClientPolicy(payload []byte) {
 	// policy block sits after the native-width base payload.
 	policy, ok := VpnProto.DecodeSessionAcceptPolicy(payload, false)
 	if !ok {
+		// Clear rather than keep what we had. Sessions are re-established over
+		// the client's lifetime, so an operator who removes the ceilings and
+		// restarts must actually get them removed -- retaining the last policy
+		// would leave the client throttled indefinitely against a server that
+		// no longer asks for it.
+		c.serverPolicy.Store(nil)
 		return
 	}
 
