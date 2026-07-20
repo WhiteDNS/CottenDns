@@ -691,7 +691,14 @@ jobs:
         id: container
         shell: bash
         run: |
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cottendns-server" >> "$GITHUB_OUTPUT"
+          # Name the package after the repository, not just the owner. A fork
+          # living under the same account as its source would otherwise resolve
+          # to the identical package name, and GHCR refuses the push because the
+          # existing package is linked to the source repo (permission_denied:
+          # write_package). Deriving from the repo keeps the source repo's
+          # package name unchanged while giving every fork its own.
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${REPO_NAME,,}-server" >> "$GITHUB_OUTPUT"
       - name: Build and publish multi-architecture server image
         uses: docker/build-push-action@v6
         with:
