@@ -96,6 +96,7 @@ func BuildVPNResponsePacket(questionPacket []byte, answerName string, packet Vpn
 		TotalFragments:  packet.TotalFragments,
 		CompressionType: packet.CompressionType,
 		Payload:         packet.Payload,
+		LegacySessionID: packet.LegacySessionID,
 	}, compression.DefaultMinSize)
 
 	if err != nil {

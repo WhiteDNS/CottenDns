@@ -19,6 +19,12 @@ type BuildOptions struct {
 	TotalFragments  uint8
 	CompressionType uint8
 	Payload         []byte
+
+	// LegacySessionID emits the one-byte session-ID header of the
+	// MasterDNS/StormDNS lineage instead of CottenDns's two-byte field. The
+	// server copies it from the request packet so replies match the format the
+	// client speaks; native clients leave it false.
+	LegacySessionID bool
 }
 
 func BuildRaw(opts BuildOptions) ([]byte, error) {
@@ -27,7 +33,8 @@ func BuildRaw(opts BuildOptions) ([]byte, error) {
 		return nil, ErrInvalidPacketType
 	}
 
-	headerLen := 3 + integrityLength // SessionID(2) + PacketType + SessionCookie + Integrity
+	sessionIDLen := sessionIDWidth(opts.LegacySessionID)
+	headerLen := sessionIDLen + 1 + integrityLength // SessionID(1|2) + PacketType + SessionCookie + Integrity
 	if flags&packetFlagStream != 0 {
 		headerLen += 2
 	}
@@ -42,10 +49,9 @@ func BuildRaw(opts BuildOptions) ([]byte, error) {
 	}
 
 	raw := make([]byte, headerLen+len(opts.Payload))
-	raw[0] = byte(opts.SessionID >> 8)
-	raw[1] = byte(opts.SessionID)
-	raw[2] = opts.PacketType
-	offset := 3
+	writeSessionID(raw, opts.SessionID, sessionIDLen)
+	raw[sessionIDLen] = opts.PacketType
+	offset := sessionIDLen + 1
 
 	if flags&packetFlagStream != 0 {
 		raw[offset] = byte(opts.StreamID >> 8)

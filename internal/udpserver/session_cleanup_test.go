@@ -237,12 +237,12 @@ func TestSessionStoreHonorsMaxActiveSessionsCap(t *testing.T) {
 	}
 
 	for i := 0; i < cap; i++ {
-		if _, _, err := store.findOrCreate(newPayload(i), 0, 0, 8); err != nil {
+		if _, _, err := store.findOrCreate(newPayload(i), 0, 0, 8, false); err != nil {
 			t.Fatalf("session %d within cap should succeed, got %v", i, err)
 		}
 	}
 	// One past the cap must be refused rather than allocated.
-	if _, _, err := store.findOrCreate(newPayload(cap), 0, 0, 8); err != ErrSessionTableFull {
+	if _, _, err := store.findOrCreate(newPayload(cap), 0, 0, 8, false); err != ErrSessionTableFull {
 		t.Fatalf("expected ErrSessionTableFull past cap, got %v", err)
 	}
 }

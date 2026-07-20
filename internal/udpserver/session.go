@@ -29,7 +29,14 @@ var ErrSessionTableFull = errors.New("session table full")
 const (
 	maxServerSessionID    = 65535
 	maxServerSessionSlots = 65535
-	sessionInitDataSize   = 10
+	// maxLegacySessionID is the largest ID a MasterDNS/StormDNS client can
+	// represent in its one-byte session field. The ID space is split at this
+	// boundary — legacy sessions below it, native sessions above — so that the
+	// parser can tell the two header layouts apart by the ID they decode to
+	// (see vpnproto.parseFrom). Native clients lose the first 255 IDs, which is
+	// immaterial against a 65535 space.
+	maxLegacySessionID  = 255
+	sessionInitDataSize = 10
 	minSessionMTU         = 10
 	maxSessionMTU         = 4096
 )
@@ -37,7 +44,12 @@ const (
 type sessionRecord struct {
 	mu sync.RWMutex
 
-	ID                                  uint16
+	ID uint16
+	// LegacySessionID records that this session was opened by a client of the
+	// MasterDNS/StormDNS lineage, which spends one header byte on the session
+	// ID instead of two. Every reply on this session is built back in that
+	// format.
+	LegacySessionID                     bool
 	Cookie                              uint8
 	ResponseMode                        uint8
 	UploadCompression                   uint8
@@ -121,6 +133,7 @@ func getEffectivePriority(packetType uint8, basePriority int) int {
 
 type sessionRuntimeView struct {
 	ID                  uint16
+	LegacySessionID     bool
 	Cookie              uint8
 	ResponseMode        uint8
 	ResponseBase64      bool
@@ -260,7 +273,7 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 	}
 }
 
-func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int) (*sessionRecord, bool, error) {
+func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int, legacy bool) (*sessionRecord, bool, error) {
 	if len(payload) != sessionInitDataSize || !isValidSessionResponseMode(payload[0]) {
 		return nil, false, nil
 	}
@@ -277,7 +290,11 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 
 	if sessionID, ok := s.bySig[signature]; ok {
 		if existing := s.byID[sessionID]; existing != nil {
-			if nowUnixNano <= existing.reuseUntilUnixNano {
+			// The signature is derived from the init payload alone, which is
+			// identical in both wire formats, so it can collide across client
+			// generations. Reusing a record of the other format would hand the
+			// client a session ID it cannot express, so only reuse on a match.
+			if nowUnixNano <= existing.reuseUntilUnixNano && existing.LegacySessionID == legacy {
 				existing.setLastActivityUnixNano(nowUnixNano)
 				return existing, true, nil
 			}
@@ -285,13 +302,14 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 		delete(s.bySig, signature)
 	}
 
-	slot := s.allocateSlotLocked()
+	slot := s.allocateSlotLocked(legacy)
 	if slot < 0 {
 		return nil, false, ErrSessionTableFull
 	}
 
 	record := &sessionRecord{
 		ID:                  uint16(slot),
+		LegacySessionID:     legacy,
 		ResponseMode:        payload[0],
 		CreatedAt:           now,
 		ReuseUntil:          now.Add(s.sessionInitTTL),
@@ -566,7 +584,14 @@ func (s *sessionStore) SweepRecentlyClosedStreams(now time.Time) {
 	}
 }
 
-func (s *sessionStore) allocateSlotLocked() int {
+// allocateSlotLocked picks a free session ID from the half of the space that
+// matches the client's header format: 1..255 for legacy MasterDNS/StormDNS
+// clients, which cannot express anything wider, and 256..65535 for native
+// clients. Keeping the ranges disjoint is what lets the parser resolve the two
+// header layouts, so neither branch may borrow from the other — a legacy client
+// gets ErrSessionTableFull once 255 of them are connected even while the native
+// range is empty.
+func (s *sessionStore) allocateSlotLocked(legacy bool) int {
 	cap := s.maxActiveSessions
 	if cap <= 0 || cap > maxServerSessionSlots {
 		cap = maxServerSessionSlots
@@ -575,16 +600,26 @@ func (s *sessionStore) allocateSlotLocked() int {
 		return -1
 	}
 
-	start := int(s.nextID)
-	if start < 1 || start > maxServerSessionID {
-		start = 1
+	low, high := maxLegacySessionID+1, maxServerSessionID
+	if legacy {
+		low, high = 1, maxLegacySessionID
 	}
-	for slot := start; slot <= maxServerSessionID; slot++ {
+
+	// ponytail: both ranges share the one nextID cursor, so an allocation whose
+	// range the cursor is not currently in restarts its scan at the range floor
+	// and walks past every live session. Harmless while sessions number in the
+	// hundreds; give each range its own cursor if mixed-format servers ever run
+	// hot enough for the scan to show up.
+	start := int(s.nextID)
+	if start < low || start > high {
+		start = low
+	}
+	for slot := start; slot <= high; slot++ {
 		if s.byID[slot] == nil {
 			return slot
 		}
 	}
-	for slot := 1; slot < start; slot++ {
+	for slot := low; slot < start; slot++ {
 		if s.byID[slot] == nil {
 			return slot
 		}
@@ -703,6 +738,7 @@ func (r *sessionRecord) applyMTUFromSessionInit(uploadMTU uint16, downloadMTU ui
 func (r *sessionRecord) runtimeView() sessionRuntimeView {
 	return sessionRuntimeView{
 		ID:                  r.ID,
+		LegacySessionID:     r.LegacySessionID,
 		Cookie:              r.Cookie,
 		ResponseMode:        r.ResponseMode,
 		ResponseBase64:      r.ResponseMode == mtuProbeModeBase64,

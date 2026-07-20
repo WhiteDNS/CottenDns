@@ -74,6 +74,7 @@ func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answ
 		TotalFragments:  packet.TotalFragments,
 		CompressionType: packet.CompressionType,
 		Payload:         packet.Payload,
+		LegacySessionID: packet.LegacySessionID,
 	}, compression.DefaultMinSize)
 	if err != nil {
 		return nil, err
