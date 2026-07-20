@@ -47,10 +47,12 @@ func (c *Client) applyServerClientPolicy(payload []byte) {
 		// would leave the client throttled indefinitely against a server that
 		// no longer asks for it.
 		c.serverPolicy.Store(nil)
+		c.refreshPolicyDerivedState()
 		return
 	}
 
 	c.serverPolicy.Store(&policy)
+	c.refreshPolicyDerivedState()
 
 	if c.log != nil {
 		c.log.Debugf(
@@ -60,6 +62,24 @@ func (c *Client) applyServerClientPolicy(payload []byte) {
 			policy.MinPingAggressiveInterval,
 		)
 	}
+}
+
+// refreshPolicyDerivedState recomputes the session state that was derived from
+// a governed value before the policy existed.
+//
+// maxPackedBlocks is the case that matters: it is computed from the batch size
+// during MTU probing, which happens before SESSION_INIT is even sent, so
+// without this the server's batch ceiling would be stored and then never
+// consulted -- the ceiling would silently do nothing for the whole session.
+//
+// Called from applyServerClientPolicy, which runs on the init collector
+// goroutine before sessionReady is set, so this write lands before the send
+// path can read it.
+func (c *Client) refreshPolicyDerivedState() {
+	if c == nil || c.syncedUploadMTU <= 0 {
+		return
+	}
+	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(c.syncedUploadMTU, 80, c.effectiveMaxPacketsPerBatch())
 }
 
 // serverPolicySnapshot returns the active policy, or nil when the server stated

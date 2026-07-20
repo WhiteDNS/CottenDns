@@ -259,6 +259,53 @@ func TestScaledPolicyFloorsCannotBindADefaultClient(t *testing.T) {
 	}
 }
 
+// maxPackedBlocks is derived from the batch size during MTU probing, which
+// happens before SESSION_INIT is sent. Storing the policy afterwards is not
+// enough: unless the derived value is recomputed, the server's batch ceiling is
+// accepted and then silently ignored for the whole session.
+func TestBatchCeilingReachesDerivedMaxPackedBlocks(t *testing.T) {
+	verify := [4]byte{1, 2, 3, 4}
+
+	c := policyTestClient(config.ClientConfig{MaxPacketsPerBatch: 32})
+	c.syncedUploadMTU = 1200
+	// Stand in for the MTU-probe stage, which runs before any policy exists.
+	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(c.syncedUploadMTU, 80, c.cfg.MaxPacketsPerBatch)
+	unclamped := c.maxPackedBlocks
+
+	accept := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify,
+		VpnProto.SessionAcceptClientPolicy{MaxPacketsPerBatch: 2}, false)
+	c.applyServerClientPolicy(accept)
+
+	if c.effectiveMaxPacketsPerBatch() != 2 {
+		t.Fatalf("effective batch = %d, want the server's 2", c.effectiveMaxPacketsPerBatch())
+	}
+	want := VpnProto.CalculateMaxPackedBlocks(c.syncedUploadMTU, 80, 2)
+	if c.maxPackedBlocks != want {
+		t.Fatalf("maxPackedBlocks = %d, want %d recomputed under the ceiling (was %d)", c.maxPackedBlocks, want, unclamped)
+	}
+}
+
+// Withdrawing a policy must likewise restore the derived value, not leave the
+// client pinned to the clamped batch size forever.
+func TestWithdrawnPolicyRestoresDerivedMaxPackedBlocks(t *testing.T) {
+	verify := [4]byte{1, 2, 3, 4}
+
+	c := policyTestClient(config.ClientConfig{MaxPacketsPerBatch: 32})
+	c.syncedUploadMTU = 1200
+
+	clamped := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify,
+		VpnProto.SessionAcceptClientPolicy{MaxPacketsPerBatch: 2}, false)
+	c.applyServerClientPolicy(clamped)
+
+	bare := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify, VpnProto.SessionAcceptClientPolicy{}, false)
+	c.applyServerClientPolicy(bare)
+
+	want := VpnProto.CalculateMaxPackedBlocks(c.syncedUploadMTU, 80, 32)
+	if c.maxPackedBlocks != want {
+		t.Fatalf("maxPackedBlocks = %d, want the unclamped %d after the policy was withdrawn", c.maxPackedBlocks, want)
+	}
+}
+
 // The end-to-end client path: a real accept payload carrying a policy must be
 // picked up, and one without a policy must leave the client unconstrained.
 func TestApplyServerClientPolicyFromAcceptPayload(t *testing.T) {
