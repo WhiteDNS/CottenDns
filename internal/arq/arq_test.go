@@ -84,13 +84,53 @@ func (RejectingPacketEnqueuer) PushTXPacket(priority int, packetType uint8, sequ
 	return false
 }
 
+// testLogger forwards ARQ logging to the test, but stops once the test
+// finishes.
+//
+// ARQ logs from its own background goroutines (writeLoop, ioLoop, and the
+// retransmit and rx loops). Close does not wait for those goroutines to exit,
+// so one of them can still be inside finalizeClose -- and therefore inside
+// Debugf -- after the test function has returned. Calling t.Logf at that point
+// races with the testing package's own end-of-test bookkeeping, which is a real
+// data race the race detector fails on, and it is intermittent because it
+// depends on whether the goroutine happens to log before or after the test
+// unwinds.
+//
+// Suppressing output after completion is the fix that covers every test at
+// once, rather than making each individual test wait for goroutines it did not
+// start. The mutex is what makes it safe: the cleanup and any concurrent log
+// call serialise on it, so a late log either happens while the test is still
+// live or is dropped.
 type testLogger struct {
 	t *testing.T
+
+	mu   sync.Mutex
+	done bool
 }
 
-func (l *testLogger) Debugf(format string, args ...any) { l.t.Logf("[DEBUG] "+format, args...) }
-func (l *testLogger) Infof(format string, args ...any)  { l.t.Logf("[INFO] "+format, args...) }
-func (l *testLogger) Errorf(format string, args ...any) { l.t.Logf("[ERROR] "+format, args...) }
+func newTestLogger(t *testing.T) *testLogger {
+	t.Helper()
+	l := &testLogger{t: t}
+	t.Cleanup(func() {
+		l.mu.Lock()
+		l.done = true
+		l.mu.Unlock()
+	})
+	return l
+}
+
+func (l *testLogger) logf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done {
+		return
+	}
+	l.t.Logf(format, args...)
+}
+
+func (l *testLogger) Debugf(format string, args ...any) { l.logf("[DEBUG]"+" "+format, args...) }
+func (l *testLogger) Infof(format string, args ...any)  { l.logf("[INFO]"+" "+format, args...) }
+func (l *testLogger) Errorf(format string, args ...any) { l.logf("[ERROR]"+" "+format, args...) }
 
 type eofAfterDataConn struct {
 	mu     sync.Mutex
@@ -438,7 +478,7 @@ func TestARQ_New(t *testing.T) {
 		RTO:        0.1,
 		MaxRTO:     0.5,
 	}
-	a := NewARQ(1, 2, enqueuer, nil, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 2, enqueuer, nil, 1000, newTestLogger(t), cfg)
 
 	if a.streamID != 1 {
 		t.Errorf("expected streamID 1, got %d", a.streamID)
@@ -453,7 +493,7 @@ func TestARQ_New(t *testing.T) {
 
 func TestARQ_DefaultBackpressureFloorRemainsConservative(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 2, enqueuer, nil, 1000, &testLogger{t}, Config{})
+	a := NewARQ(1, 2, enqueuer, nil, 1000, newTestLogger(t), Config{})
 
 	if a.windowSize != 300 {
 		t.Fatalf("expected default window size floor 300, got %d", a.windowSize)
@@ -476,7 +516,7 @@ func TestARQ_SendData(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -513,7 +553,7 @@ func TestARQ_ReceiveData(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -556,7 +596,7 @@ func TestARQ_ReceiveAckPurgesQueuedDataCopy(t *testing.T) {
 		MaxRTO:     0.5,
 	}
 
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), cfg)
 	a.mu.Lock()
 	a.sndBuf[7] = &arqDataItem{
 		Data:       []byte("hello"),
@@ -579,7 +619,7 @@ func TestARQ_ReceiveAckPurgesQueuedDataCopy(t *testing.T) {
 
 func TestARQ_ReceiveDataSendsBoundedNackForNearGap(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -606,7 +646,7 @@ func TestARQ_ReceiveDataSendsBoundedNackForNearGap(t *testing.T) {
 
 func TestARQ_ReceiveDataDoesNotNackFarGap(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -640,7 +680,7 @@ func TestARQ_ReceiveDataDoesNotNackFarGap(t *testing.T) {
 
 func TestARQ_HandleDataNackQueuesImmediateResend(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize: 64,
 		RTO:        0.2,
 		MaxRTO:     1.0,
@@ -684,7 +724,7 @@ func TestARQ_HandleDataNackQueuesImmediateResend(t *testing.T) {
 
 func TestARQ_HandleDataNackSuppressesImmediateDuplicateResend(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -730,7 +770,7 @@ func TestARQ_HandleDataNackSuppressesImmediateDuplicateResend(t *testing.T) {
 
 func TestARQ_ReceiveDataSuppressesRepeatedNackUntilInterval(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -759,7 +799,7 @@ func TestARQ_ReceiveDataSuppressesRepeatedNackUntilInterval(t *testing.T) {
 
 func TestARQ_ReceiveDataWaitsForInitialNackDelay(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:                  64,
 		RTO:                         0.2,
 		MaxRTO:                      1.0,
@@ -799,7 +839,7 @@ func TestARQ_ReceiveDataWaitsForInitialNackDelay(t *testing.T) {
 
 func TestARQ_ReceiveDataClearsPendingInitialNackDelayWhenGapArrives(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:                  64,
 		RTO:                         0.2,
 		MaxRTO:                      1.0,
@@ -835,7 +875,7 @@ func TestARQ_ReceiveDataClearsPendingInitialNackDelayWhenGapArrives(t *testing.T
 
 func TestARQ_ReceiveDataDoesNotNackAlreadyBufferedGap(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -881,7 +921,7 @@ func TestARQ_ReceiveDataDoesNotNackAlreadyBufferedGap(t *testing.T) {
 
 func TestARQ_ReceiveDataNacksRecentWindowWhenRcvNxtStalls(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            128,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -911,7 +951,7 @@ func TestARQ_ReceiveDataNacksRecentWindowWhenRcvNxtStalls(t *testing.T) {
 
 func TestARQ_ReceiveDataLargeGapSamplesFrontierInsteadOfFloodingNacks(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            256,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -944,7 +984,7 @@ func TestARQ_ReceiveDataLargeGapSamplesFrontierInsteadOfFloodingNacks(t *testing
 
 func TestARQ_ReceiveDataClearsQueuedNackWhenMissingDataArrives(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:            64,
 		RTO:                   0.2,
 		MaxRTO:                1.0,
@@ -969,7 +1009,7 @@ func TestARQ_ReceiveDataClearsQueuedNackWhenMissingDataArrives(t *testing.T) {
 }
 
 func TestARQ_ClearAllQueuesDropsRememberedDataNacks(t *testing.T) {
-	a := NewARQ(1, 1, NewMockPacketEnqueuer(), nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, NewMockPacketEnqueuer(), nil, 1000, newTestLogger(t), Config{
 		DataNackMaxGap:        2,
 		DataNackRepeatSeconds: 2.0,
 	})
@@ -990,7 +1030,7 @@ func TestARQ_ClearAllQueuesDropsRememberedDataNacks(t *testing.T) {
 
 func TestARQ_DataAckUpdatesAdaptiveBaseRTO(t *testing.T) {
 	enq := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enq, nil, 1200, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enq, nil, 1200, newTestLogger(t), Config{
 		WindowSize: 32,
 		RTO:        0.1,
 		MaxRTO:     0.5,
@@ -1028,7 +1068,7 @@ func TestARQ_DataAckUpdatesAdaptiveBaseRTO(t *testing.T) {
 
 func TestARQ_DataAckSkipsAdaptiveSampleAfterRetransmit(t *testing.T) {
 	enq := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enq, nil, 1200, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enq, nil, 1200, newTestLogger(t), Config{
 		WindowSize: 32,
 		RTO:        0.1,
 		MaxRTO:     0.5,
@@ -1060,7 +1100,7 @@ func TestARQ_DataAckSkipsAdaptiveSampleAfterRetransmit(t *testing.T) {
 
 func TestARQ_ControlAckUpdatesAdaptiveBaseRTO(t *testing.T) {
 	enq := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enq, nil, 1200, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enq, nil, 1200, newTestLogger(t), Config{
 		WindowSize:               32,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -1114,7 +1154,7 @@ func TestARQ_OutOfOrderReceive(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1176,7 +1216,7 @@ func TestARQ_Retransmission(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1219,7 +1259,7 @@ func TestARQ_Retransmission(t *testing.T) {
 
 func TestARQ_RetransmitPrioritiesFavorFrontWindow(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize: 10,
 		RTO:        0.1,
 		MaxRTO:     0.5,
@@ -1293,7 +1333,7 @@ func TestARQ_ACKHandling(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1342,7 +1382,7 @@ func TestARQ_GracefulClose(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 
 	time.Sleep(50 * time.Millisecond)
@@ -1389,7 +1429,7 @@ func TestARQ_ClientEOFQueuesRSTInsteadOfFIN(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1416,7 +1456,7 @@ func TestARQ_IOReadDataWithEOFStillQueuesFinalChunk(t *testing.T) {
 	}
 
 	conn := &eofAfterDataConn{data: []byte("final chunk")}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1456,7 +1496,7 @@ func TestARQ_ClientIOReadDataWithEOFQueuesFinalChunkAndEntersResetPath(t *testin
 	}
 
 	conn := &eofAfterDataConn{data: []byte("final chunk")}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1506,7 +1546,7 @@ func TestARQ_IOReadDataWithErrorDefersRSTUntilDrain(t *testing.T) {
 	}
 
 	conn := &errAfterDataConn{data: []byte("chunk before read error"), err: errors.New("boom")}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1563,7 +1603,7 @@ func TestARQ_IOTransientReadErrorDoesNotResetStream(t *testing.T) {
 	}
 
 	conn := &transientReadConn{}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1586,7 +1626,7 @@ func TestARQ_WriteLoopRetriesTransientWriteError(t *testing.T) {
 	}
 
 	conn := &transientWriteConn{failWrites: 1}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1630,7 +1670,7 @@ func TestARQ_WriteLoopFlushesContiguousReceiveBufferInOrder(t *testing.T) {
 	}
 
 	conn := newAggregateWriteConn()
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1677,7 +1717,7 @@ func TestARQ_WriteErrorQueuesCloseWriteWhileOutboundDataPending(t *testing.T) {
 	}
 
 	conn := &fatalWriteConn{}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.mu.Lock()
 	a.sndBuf[7] = &arqDataItem{
 		Data:       []byte("pending outbound"),
@@ -1728,7 +1768,7 @@ func TestARQ_PeerFinHalfCloseStillAcceptsInboundData(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1776,7 +1816,7 @@ func TestARQ_FinHandshakeWaitsForInboundWriteDrain(t *testing.T) {
 	}
 
 	conn := newBlockingWriteConn()
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1816,7 +1856,7 @@ func TestARQ_CloseReadAckTimeoutEscalatesToRST(t *testing.T) {
 		TerminalAckWaitTimeout:   0.1,
 	}
 
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), cfg)
 	a.mu.Lock()
 	closeReadSeq := uint16(7)
 	a.closeReadSeqSent = &closeReadSeq
@@ -1863,7 +1903,7 @@ func TestARQ_GracefulCloseWriteFailureStillRechecksCloseReadCompletion(t *testin
 	}
 
 	conn := newCloseOnWriteConn()
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1911,7 +1951,7 @@ func TestARQ_ClientGracefulCloseWriteFailureQueuesCloseWrite(t *testing.T) {
 	}
 
 	conn := newCloseOnWriteConn()
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -1954,7 +1994,7 @@ func TestARQ_ClientGracefulCloseWriteFailureQueuesCloseWrite(t *testing.T) {
 
 func TestARQ_ReceiveDataAfterLocalWriterClosedQueuesCloseWriteOnceThenIgnores(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -1991,7 +2031,7 @@ func TestARQ_ReceiveDataAfterLocalWriterClosedQueuesCloseWriteOnceThenIgnores(t 
 
 func TestARQ_CloseWriteReceivedSettlesDeferredCloseReadDrain(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2020,7 +2060,7 @@ func TestARQ_CloseWriteReceivedSettlesDeferredCloseReadDrain(t *testing.T) {
 
 func TestARQ_ClientCloseWriteAckInitiatesCloseReadWhenWriterBroken(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2054,7 +2094,7 @@ func TestARQ_ClientCloseWriteAckInitiatesCloseReadWhenWriterBroken(t *testing.T)
 
 func TestARQ_ClientCloseWriteAndCloseReadAckFinalizeWithoutPeerCloseRead(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2097,7 +2137,7 @@ func TestARQ_ClientCloseWriteAndCloseReadAckFinalizeWithoutPeerCloseRead(t *test
 
 func TestARQ_ClientLocalDisconnectWaitsForPendingInboundQueueToDrain(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2151,7 +2191,7 @@ func TestARQ_ClientLocalDisconnectWaitsForPendingInboundQueueToDrain(t *testing.
 
 func TestARQ_RemoteEOFDoesNotFinalizeWhileCloseWriteOnlySentForBrokenWriter(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2184,7 +2224,7 @@ func TestARQ_RemoteEOFDoesNotFinalizeWhileCloseWriteOnlySentForBrokenWriter(t *t
 
 func TestARQ_RxLoopShutdownDrainsPendingInboundQueueAccounting(t *testing.T) {
 	enqueuer := NewMockPacketEnqueuer()
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), Config{
 		WindowSize: 100,
 		RTO:        0.1,
 		MaxRTO:     0.5,
@@ -2220,7 +2260,7 @@ func TestARQ_WriteDeadlineTimeoutRetriesAndFlushes(t *testing.T) {
 	}
 
 	conn := &writeDeadlineTimeoutConn{}
-	a := NewARQ(1, 1, enqueuer, conn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, conn, 1000, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
@@ -2256,7 +2296,7 @@ func TestARQ_WriteDeadlineTimeoutRetriesAndFlushes(t *testing.T) {
 }
 
 func TestARQ_DataRetransmitDoesNotAdvanceRetryOrRTOWhenEnqueueRejected(t *testing.T) {
-	a := NewARQ(1, 1, RejectingPacketEnqueuer{}, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, RejectingPacketEnqueuer{}, nil, 1000, newTestLogger(t), Config{
 		WindowSize: 100,
 		RTO:        0.1,
 		MaxRTO:     0.5,
@@ -2377,7 +2417,7 @@ func TestARQ_CheckRetransmitsUsesActualDequeueTime(t *testing.T) {
 }
 
 func TestARQ_ControlRetransmitDoesNotAdvanceRetryOrRTOWhenEnqueueRejected(t *testing.T) {
-	a := NewARQ(1, 1, RejectingPacketEnqueuer{}, nil, 1000, &testLogger{t}, Config{
+	a := NewARQ(1, 1, RejectingPacketEnqueuer{}, nil, 1000, newTestLogger(t), Config{
 		WindowSize:               100,
 		RTO:                      0.1,
 		MaxRTO:                   0.5,
@@ -2432,7 +2472,7 @@ func TestARQ_PeerCloseReadThenLocalCloseReadAckClosesWithoutRST(t *testing.T) {
 		EnableControlReliability: true,
 	}
 
-	a := NewARQ(1, 1, enqueuer, nil, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, nil, 1000, newTestLogger(t), cfg)
 
 	a.MarkCloseReadReceived()
 	if state := a.State(); state != StateHalfClosedRemote {
@@ -2490,7 +2530,7 @@ func TestARQ_Reset(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 1000, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 1000, newTestLogger(t), cfg)
 	a.Start()
 
 	time.Sleep(50 * time.Millisecond)
@@ -2526,7 +2566,7 @@ func TestARQ_Backpressure(t *testing.T) {
 	defer localApp.Close()
 	defer arqConn.Close()
 
-	a := NewARQ(1, 1, enqueuer, arqConn, 10, &testLogger{t}, cfg)
+	a := NewARQ(1, 1, enqueuer, arqConn, 10, newTestLogger(t), cfg)
 	a.Start()
 	defer a.Close("test end", CloseOptions{Force: true})
 
