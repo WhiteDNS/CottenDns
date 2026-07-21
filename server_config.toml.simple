@@ -228,6 +228,33 @@ MAX_ACTIVE_SESSIONS = 2048
 # The wire format matches the MasterDNS/StormDNS family, so those clients honour
 # these limits too. The two MTU ceilings are additionally enforced server-side,
 # so they bind even a client that ignores the policy.
+#
+# FOR MAXIMUM CLIENT SPEED, LEAVE EVERY KEY IN THIS SECTION AT 0.
+#
+# These are resource ceilings, not tuning knobs: each one can only take capacity
+# away from a client that wanted more. There is no value here that makes a
+# client faster. Reach for them when a server is genuinely under pressure and
+# you are willing to trade some client throughput for it -- not as part of a
+# performance setup.
+#
+# If you do need them, these are the ones that actually reduce server load:
+#
+#   MIN_ALLOWED_CLIENT_PING_AGGRESSIVE_INTERVAL_SECONDS
+#       The only direct control over how fast a client polls, so the only one
+#       that really bounds query rate. Costs latency in exchange.
+#   MAX_ALLOWED_CLIENT_DOWNLOAD_MTU
+#       Bounds every response the server builds, and is enforced server-side.
+#   MAX_ALLOWED_CLIENT_ARQ_WINDOW_SIZE
+#       Bounds unacknowledged data tracked per stream (memory).
+#   MAX_ALLOWED_CLIENT_PACKET_DUPLICATION_COUNT
+#       Duplication multiplies query volume outright.
+#
+# One trap worth knowing: MAX_ALLOWED_CLIENT_PACKETS_PER_BATCH does NOT reduce
+# query volume, it increases it. Batching packs several control blocks (ACKs and
+# similar) into one query, so a lower ceiling means MORE queries carrying the
+# same acknowledgements -- slower for the client and more requests for the
+# server. It bounds the size and per-query work of a single packed unit, nothing
+# else. Leave it at 0 unless you have measured a per-query cost problem.
 
 # Largest upload/download MTU a client may request in SESSION_INIT.
 # 0 disables the ceiling. The download MTU sizes every response the server

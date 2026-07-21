@@ -121,6 +121,12 @@ func applyClientSpeedPreset(cfg *ClientConfig, isDefined configKeyDefinedFunc) {
 	setClientInt(isDefined, "MTU_TEST_PARALLELISM_RESOLVERS", &cfg.MTUTestParallelismResolvers, 100)
 	setClientInt(isDefined, "MTU_TEST_RETRIES_LOGS", &cfg.MTUTestRetriesLogs, 3)
 	setClientFloat(isDefined, "MTU_TEST_TIMEOUT_LOGS", &cfg.MTUTestTimeoutLogs, 1.5)
+	// Race the handshake across more resolvers than the default 3. Connect time
+	// is dominated by waiting out a resolver that may simply be dead, and the
+	// server keys sessions by the init signature, so the extra copies still
+	// yield exactly one session. This matches the parallelism this preset
+	// already leans on elsewhere, and costs a few extra queries once, at connect.
+	setClientInt(isDefined, "SESSION_INIT_RACING_COUNT", &cfg.SessionInitRacingCount, 5)
 	setClientInt(isDefined, "MAX_PACKETS_PER_BATCH", &cfg.MaxPacketsPerBatch, 12)
 	setClientInt(isDefined, "ARQ_WINDOW_SIZE", &cfg.ARQWindowSize, 1500)
 	setClientFloat(isDefined, "ARQ_INITIAL_RTO_SECONDS", &cfg.ARQInitialRTOSeconds, 0.45)
