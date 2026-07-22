@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -45,6 +45,7 @@ type Stream_client struct {
 
 	StreamID           uint16
 	LocalSocksVersion  byte
+	IsUDPAssociation   bool
 	NetConn            net.Conn
 	CreateTime         time.Time
 	LastActivityTime   time.Time

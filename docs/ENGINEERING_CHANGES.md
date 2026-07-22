@@ -976,6 +976,54 @@ code was not weakened or changed. Validation after the correction included:
 
 ---
 
+## 22. Sessionful generic UDP and Android full-VPN routing
+
+The native SOCKS5 listener now supports generic UDP destinations in addition to
+the optimized DNS/53 path. Each UDP association is represented by a normal ARQ
+stream, so it inherits DNS-MTU fragmentation, retransmission, path balancing,
+fair stream scheduling, and duplicate suppression rather than adding a second
+reliability protocol.
+
+Datagram boundaries are carried by a two-byte length followed by the standard
+SOCKS address, port, and payload. The one-time association marker is a reserved
+address type: an older server rejects it cleanly, while upgraded peers attach a
+sessionful UDP adapter. The server retains a connected UDP socket per target so
+QUIC, voice, and games keep a stable remote five-tuple. Target fan-out is capped,
+idle endpoints are reclaimed, and literal and DNS-resolved addresses are both
+checked against the public-address policy to prevent access to loopback,
+private, link-local, multicast, and benchmark networks. IPv4 and IPv6 are
+supported. DNS/53 remains on its lower-overhead cache-aware request path and no
+longer tears down the association merely because the first lookup is pending.
+When the server is configured with an external SOCKS5 upstream, it negotiates a
+real upstream UDP ASSOCIATE and keeps its TCP control connection alive; generic
+UDP never bypasses the operator's selected egress mode.
+
+The default local SOCKS UDP association idle time is now 120 seconds. Explicit
+client settings remain authoritative and are still bounded to the existing safe
+range.
+
+The Android full-VPN integration was updated alongside the protocol:
+
+- tun2proxy was upgraded from v0.7.21 to the verified v0.8.1 release interface;
+- the runner requests 1024 sessions, 300-second TCP lifetime, 120-second UDP
+  lifetime, IPv6, virtual DNS, and fatal-error exit reporting;
+- readiness waits for a stable native runner instead of reporting success as
+  soon as its Java thread is started;
+- network capability churn no longer kills CottenDNS; a real default-network
+  identity change gets a recovery grace period and outbound probes before a
+  restart is permitted;
+- normal stop/revoke work is moved off the Android main thread, startup jobs are
+  joined before teardown, and `onRevoke` performs explicit cleanup;
+- the JNI-owned TUN descriptor retains close-on-exec, avoiding inheritance by
+  child processes;
+- IPv6 is routed end-to-end instead of intentionally sinkholed;
+- split-tunnel include mode with no apps and any unfulfillable include/exclude
+  selection fail closed instead of silently broadening VPN scope; and
+- connection verification reports a failed outbound probe as failure rather
+  than calling an unverified route ready.
+
+---
+
 *All changes keep ARQ as the correctness backstop; every optimization above is
 designed to fail safe — if FEC, MTU grouping, a carrier, or a transport channel
 does not help on a given path, the tunnel still delivers through the surviving
