@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -12,6 +12,7 @@ import (
 
 	"cottendns-go/internal/config"
 	Enums "cottendns-go/internal/enums"
+	VpnProto "cottendns-go/internal/vpnproto"
 )
 
 func buildTestClientWithResolvers(cfg config.ClientConfig, keys ...string) *Client {
@@ -309,6 +310,25 @@ func TestRuntimePacketDuplicationCountUsesDirectionalValues(t *testing.T) {
 	}
 	if got := c.runtimePacketDuplicationCount(Enums.PACKET_PACKED_CONTROL_BLOCKS); got != 4 {
 		t.Fatalf("download setup: got=%d want=4", got)
+	}
+}
+
+func TestServerPolicyCapsDataAndSetupDuplication(t *testing.T) {
+	c := &Client{cfg: config.ClientConfig{
+		UploadPacketDuplicationCount:        6,
+		DownloadPacketDuplicationCount:      5,
+		UploadSetupPacketDuplicationCount:   8,
+		DownloadSetupPacketDuplicationCount: 7,
+	}}
+	policy := VpnProto.SessionAcceptClientPolicy{
+		MaxPacketDuplicationCount: 2,
+		MaxSetupDuplicationCount:  3,
+	}
+	c.serverPolicy.Store(&policy)
+
+	up, down, upSetup, downSetup := c.directionalDuplicationCounts()
+	if up != 2 || down != 2 || upSetup != 3 || downSetup != 3 {
+		t.Fatalf("policy duplication = (%d,%d,%d,%d), want (2,2,3,3)", up, down, upSetup, downSetup)
 	}
 }
 

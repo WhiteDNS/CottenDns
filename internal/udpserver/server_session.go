@@ -828,6 +828,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 	)
 	if err != nil {
 		if err == ErrSessionTableFull {
+			s.sessionBusyResponses.Add(1)
 			if s.log != nil {
 				s.log.Errorf(
 					"\U0001F6AB <red>Session Table Full Request: <cyan>SESSION_INIT</cyan>, Domain: <cyan>%s</cyan></red>",

@@ -225,9 +225,9 @@ MAX_ACTIVE_SESSIONS = 2048
 # 0 the server sends no policy at all and SESSION_ACCEPT is byte-for-byte what
 # it has always been, so leaving this section alone changes nothing.
 #
-# The wire format matches the MasterDNS/StormDNS family, so those clients honour
-# these limits too. The two MTU ceilings are additionally enforced server-side,
-# so they bind even a client that ignores the policy.
+# The wire format matches the MasterDNS/StormDNS family, so compatible clients
+# honour these limits too. Download MTU is additionally enforced server-side;
+# upload MTU is enforced by compatible clients after SESSION_ACCEPT.
 #
 # FOR MAXIMUM CLIENT SPEED, LEAVE EVERY KEY IN THIS SECTION AT 0.
 #
@@ -256,9 +256,9 @@ MAX_ACTIVE_SESSIONS = 2048
 # server. It bounds the size and per-query work of a single packed unit, nothing
 # else. Leave it at 0 unless you have measured a per-query cost problem.
 
-# Largest upload/download MTU a client may request in SESSION_INIT.
-# 0 disables the ceiling. The download MTU sizes every response the server
-# builds, so it is the one with the most direct effect on server cost.
+# Largest upload/download MTU a client may use. 0 disables the ceiling.
+# Upload range: 10..255. Download range: 10..4096. The download MTU sizes every
+# response the server builds, so it has the most direct effect on server cost.
 MAX_ALLOWED_CLIENT_UPLOAD_MTU = 0
 MAX_ALLOWED_CLIENT_DOWNLOAD_MTU = 0
 

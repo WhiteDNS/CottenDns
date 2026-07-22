@@ -8,6 +8,7 @@
 package client
 
 import (
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -326,5 +327,49 @@ func TestApplyServerClientPolicyFromAcceptPayload(t *testing.T) {
 	c2.applyServerClientPolicy(bare)
 	if got := c2.effectiveARQWindowSize(); got != 4096 {
 		t.Fatalf("ARQ window = %d, want the configured 4096 when no policy was sent", got)
+	}
+}
+
+func TestPolicyClampsAndRestoresMTUAndWorkers(t *testing.T) {
+	verify := [4]byte{1, 2, 3, 4}
+	c := policyTestClient(config.ClientConfig{RX_TX_Workers: 12, MaxPacketsPerBatch: 32})
+	c.applySyncedMTUState(200, 1400, 0)
+
+	clamped := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify, VpnProto.SessionAcceptClientPolicy{
+		MaxUploadMTU:   120,
+		MaxDownloadMTU: 900,
+		MaxRxTxWorkers: 4,
+	}, false)
+	c.applyServerClientPolicy(clamped)
+	if c.syncedUploadMTU != 120 || c.syncedDownloadMTU != 900 || c.tunnelRX_TX_Workers != 4 {
+		t.Fatalf("clamped state = up %d, down %d, workers %d", c.syncedUploadMTU, c.syncedDownloadMTU, c.tunnelRX_TX_Workers)
+	}
+
+	bare := VpnProto.EncodeSessionAccept(300, 0x5A, 0, verify, VpnProto.SessionAcceptClientPolicy{}, false)
+	c.applyServerClientPolicy(bare)
+	if c.syncedUploadMTU != 200 || c.syncedDownloadMTU != 1400 || c.tunnelRX_TX_Workers != 12 {
+		t.Fatalf("restored state = up %d, down %d, workers %d", c.syncedUploadMTU, c.syncedDownloadMTU, c.tunnelRX_TX_Workers)
+	}
+}
+
+func TestSessionInitAdvertisesMeasuredMTUAfterPolicyClamp(t *testing.T) {
+	c := policyTestClient(config.ClientConfig{RX_TX_Workers: 4, MaxPacketsPerBatch: 16})
+	c.applySyncedMTUState(200, 1400, 0)
+	policy := VpnProto.SessionAcceptClientPolicy{MaxUploadMTU: 120, MaxDownloadMTU: 900}
+	c.serverPolicy.Store(&policy)
+	c.refreshPolicyDerivedState()
+	if c.syncedUploadMTU != 120 || c.syncedDownloadMTU != 900 {
+		t.Fatalf("active MTUs were not clamped: up=%d down=%d", c.syncedUploadMTU, c.syncedDownloadMTU)
+	}
+
+	payload, _, _, err := c.buildSessionInitPayload()
+	if err != nil {
+		t.Fatalf("buildSessionInitPayload: %v", err)
+	}
+	if up := int(binary.BigEndian.Uint16(payload[2:4])); up != 200 {
+		t.Fatalf("advertised upload MTU = %d, want measured 200", up)
+	}
+	if down := int(binary.BigEndian.Uint16(payload[4:6])); down != 1400 {
+		t.Fatalf("advertised download MTU = %d, want measured 1400", down)
 	}
 }

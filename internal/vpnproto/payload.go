@@ -76,6 +76,110 @@ func ParseInflatedFromLabelsAny(labels string, codecs []*security.Codec, startId
 	return packet, idx, nil
 }
 
+// ParseInflatedFromLabelsAnyMatching resolves the rare frame that validates as
+// both native and legacy by preferring the candidate accepted by match. The
+// normal one-layout path returns before calling match, so native traffic pays
+// no session lookup and creates no candidate slice; its legacy probe normally
+// exits immediately on the alternate packet-type byte. This is intended for
+// servers, which can check an ambiguous candidate's session ID, cookie and wire
+// format against their active session table. When neither candidate matches it
+// preserves ParseInflatedFromLabelsAny's native-first compatibility behavior.
+func ParseInflatedFromLabelsAnyMatching(labels string, codecs []*security.Codec, startIdx int, match func(Packet) bool) (Packet, int, error) {
+	packet, idx, err := parseFromLabelsAnyMatching(labels, codecs, startIdx, match, true)
+	return packet, idx, err
+}
+
+// ParseFromLabelsAnyMatching is the non-inflating counterpart used by UDP
+// ingress admission. It decrypts and resolves native/legacy header ambiguity
+// exactly once, while leaving potentially expensive payload decompression to a
+// bounded worker. The returned packet is otherwise fully parsed and safe to
+// carry through the ingress queue.
+func ParseFromLabelsAnyMatching(labels string, codecs []*security.Codec, startIdx int, match func(Packet) bool) (Packet, int, error) {
+	return parseFromLabelsAnyMatching(labels, codecs, startIdx, match, false)
+}
+
+func parseFromLabelsAnyMatching(labels string, codecs []*security.Codec, startIdx int, match func(Packet) bool, inflate bool) (Packet, int, error) {
+	n := len(codecs)
+	if n == 0 {
+		return Packet{}, -1, ErrCodecUnavailable
+	}
+	if startIdx < 0 || startIdx >= n {
+		startIdx = 0
+	}
+
+	var (
+		fallback    Packet
+		fallbackIdx = -1
+		lastErr     error
+	)
+	for offset := 0; offset < n; offset++ {
+		idx := (startIdx + offset) % n
+		codec := codecs[idx]
+		if codec == nil {
+			continue
+		}
+		raw, err := codec.DecodeStringAndDecrypt(labels)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var native, legacy Packet
+		nativeOK := false
+		legacyOK := false
+		if candidate, parseErr := parseWidth(raw, 0, 2); parseErr == nil && plausibleNativeSessionID(candidate) {
+			if inflate {
+				candidate, parseErr = InflatePayload(candidate)
+			}
+			if parseErr == nil {
+				native, nativeOK = candidate, true
+			} else {
+				lastErr = parseErr
+			}
+		} else if parseErr != nil {
+			lastErr = parseErr
+		}
+		if candidate, parseErr := parseWidth(raw, 0, 1); parseErr == nil && candidate.SessionID <= maxLegacySessionID {
+			if inflate {
+				candidate, parseErr = InflatePayload(candidate)
+			}
+			if parseErr == nil {
+				legacy, legacyOK = candidate, true
+			} else {
+				lastErr = parseErr
+			}
+		} else if parseErr != nil && !nativeOK {
+			lastErr = parseErr
+		}
+
+		switch {
+		case nativeOK && !legacyOK:
+			return native, idx, nil
+		case legacyOK && !nativeOK:
+			return legacy, idx, nil
+		case nativeOK && legacyOK:
+			if match != nil {
+				if match(native) {
+					return native, idx, nil
+				}
+				if match(legacy) {
+					return legacy, idx, nil
+				}
+			}
+			if fallbackIdx < 0 {
+				fallback, fallbackIdx = native, idx
+			}
+		}
+	}
+	if fallbackIdx >= 0 {
+		return fallback, fallbackIdx, nil
+	}
+	if lastErr == nil {
+		lastErr = ErrInvalidEncodedData
+	}
+	return Packet{}, -1, lastErr
+}
+
 // ParseFromLabelsAny performs only decoding, decryption and frame-header
 // validation. Ingress admission uses this variant before queueing so hostile
 // packets cannot trigger decompression or consume worker-queue memory.

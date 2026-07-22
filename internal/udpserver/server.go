@@ -45,6 +45,7 @@ type Server struct {
 	codec                    *security.Codec
 	codecs                   []*security.Codec // candidate codecs for encryption-method auto-detect
 	preferredCodec           atomic.Int32      // index into codecs to try first
+	codecAccepted            [6]atomic.Uint64  // successful ingress frames by encryption method
 	domainMatcher            *domainMatcher.Matcher
 	sessions                 *sessionStore
 	deferredDNSSession       *deferredSessionProcessor
@@ -83,6 +84,15 @@ type Server struct {
 	invalidSessionDropLog    throttledLogState
 	droppedPackets           atomic.Uint64
 	ingressRejectedPackets   atomic.Uint64
+	ingressPreparedPackets   atomic.Uint64
+	ingressInflateFailures   atomic.Uint64
+	ingressControlDepth      atomic.Int64
+	ingressDataDepth         atomic.Int64
+	ingressControlHighWater  atomic.Uint64
+	ingressDataHighWater     atomic.Uint64
+	ingressLatencyNanos      atomic.Uint64
+	ingressLatencySamples    atomic.Uint64
+	sessionBusyResponses     atomic.Uint64
 	lastDropLogUnix          atomic.Int64
 	deferredDroppedPackets   atomic.Uint64
 	lastDeferredDropLogUnix  atomic.Int64
@@ -140,13 +150,20 @@ func buildClientPolicy(cfg config.ServerConfig) VpnProto.SessionAcceptClientPoli
 	}
 }
 
-// Stats is a point-in-time snapshot of operational counters maintained by the
-// server. The values are monotonically non-decreasing for the lifetime of the
-// process (counters are never reset). Stats() is safe to call from any
-// goroutine.
+// Stats is a point-in-time snapshot of operational counters and queue gauges
+// maintained by the server. Total/high-water values are monotonic; current
+// queue depths may rise and fall. Stats() is safe to call from any goroutine.
 type Stats struct {
 	DroppedPackets          uint64
 	IngressRejectedPackets  uint64
+	IngressPreparedPackets  uint64
+	IngressInflateFailures  uint64
+	IngressControlDepth     uint64
+	IngressDataDepth        uint64
+	IngressControlHighWater uint64
+	IngressDataHighWater    uint64
+	IngressLatencyNanos     uint64
+	IngressLatencySamples   uint64
 	DeferredDroppedPackets  uint64
 	StreamCapRejections     uint64
 	DNSResponseOversize     uint64
@@ -155,7 +172,10 @@ type Stats struct {
 	UpstreamPanicsRecovered uint64
 	CleanupPanicsRecovered  uint64
 	ActiveSessions          uint64
+	NativeSessions          uint64
+	LegacySessions          uint64
 	ActiveStreams           uint64
+	SessionBusyResponses    uint64
 	DNSUpstreamQueries      uint64
 	DNSUpstreamFailures     uint64
 	DNSUpstreamHedges       uint64
@@ -181,10 +201,18 @@ func (s *Server) Stats() Stats {
 	if s.socks5Fragments != nil {
 		fragmentConflicts += s.socks5Fragments.ConflictCount()
 	}
-	activeSessions, activeStreams := s.sessions.operationalCounts()
+	activeSessions, nativeSessions, legacySessions, activeStreams := s.sessions.operationalCounts()
 	return Stats{
 		DroppedPackets:          s.droppedPackets.Load(),
 		IngressRejectedPackets:  s.ingressRejectedPackets.Load(),
+		IngressPreparedPackets:  s.ingressPreparedPackets.Load(),
+		IngressInflateFailures:  s.ingressInflateFailures.Load(),
+		IngressControlDepth:     uint64(max(s.ingressControlDepth.Load(), 0)),
+		IngressDataDepth:        uint64(max(s.ingressDataDepth.Load(), 0)),
+		IngressControlHighWater: s.ingressControlHighWater.Load(),
+		IngressDataHighWater:    s.ingressDataHighWater.Load(),
+		IngressLatencyNanos:     s.ingressLatencyNanos.Load(),
+		IngressLatencySamples:   s.ingressLatencySamples.Load(),
 		DeferredDroppedPackets:  s.deferredDroppedPackets.Load(),
 		StreamCapRejections:     s.sessions.streamCapRejectionsCount(),
 		DNSResponseOversize:     s.dnsResponseOversize.Load(),
@@ -193,7 +221,10 @@ func (s *Server) Stats() Stats {
 		UpstreamPanicsRecovered: s.upstreamPanicsRecovered.Load(),
 		CleanupPanicsRecovered:  s.cleanupPanicsRecovered.Load(),
 		ActiveSessions:          activeSessions,
+		NativeSessions:          nativeSessions,
+		LegacySessions:          legacySessions,
 		ActiveStreams:           activeStreams,
+		SessionBusyResponses:    s.sessionBusyResponses.Load(),
 		DNSUpstreamQueries:      s.dnsUpstreamQueries.Load(),
 		DNSUpstreamFailures:     s.dnsUpstreamFailures.Load(),
 		DNSUpstreamHedges:       s.dnsUpstreamHedges.Load(),
@@ -209,13 +240,20 @@ func (s *Server) Stats() Stats {
 }
 
 type request struct {
-	buf  []byte
-	size int
-	addr *net.UDPAddr
+	buf      []byte
+	size     int
+	addr     *net.UDPAddr
+	prepared preparedIngress
+	admitted time.Time
 	// conn is the socket the datagram arrived on, so the reply leaves by the
 	// same one. With SO_REUSEPORT every socket shares the listen address, so
 	// this is transmit-load spreading rather than a correctness requirement.
 	conn *net.UDPConn
+}
+
+type ingressQueues struct {
+	control chan request
+	data    chan request
 }
 
 // errReusePortUnsupported reports that SO_REUSEPORT is unavailable, so the
@@ -307,9 +345,9 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 		},
 	}
 
-	// Enforce the MTU ceilings server-side as well as advertising them in the
-	// SESSION_ACCEPT policy. Advertising only binds a client that cooperates;
-	// this binds every client, including older ones that never read a policy.
+	// The download ceiling is enforced server-side as well as advertised. The
+	// upload value is retained on the session for accounting; compatible clients
+	// enforce it before constructing subsequent tunnel queries.
 	srv.sessions.setClientMTUCeilings(cfg.MaxAllowedClientUploadMTU, cfg.MaxAllowedClientDownloadMTU)
 
 	return srv
@@ -492,7 +530,18 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cfg.MaxIngressQueueBytes,
 	)
 
-	reqCh := make(chan request, queueCapacity)
+	controlCapacity := queueCapacity / 8
+	if queueCapacity >= 128 {
+		controlCapacity = max(controlCapacity, 64)
+	}
+	if controlCapacity >= queueCapacity && queueCapacity > 1 {
+		controlCapacity = queueCapacity - 1
+	}
+	dataCapacity := queueCapacity - controlCapacity
+	queues := ingressQueues{
+		control: make(chan request, controlCapacity),
+		data:    make(chan request, dataCapacity),
+	}
 	var workerWG sync.WaitGroup
 	cleanupDone := make(chan struct{})
 
@@ -503,7 +552,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	s.deferredDNSSession.Start(runCtx)
 	s.deferredConnectSession.Start(runCtx)
-	s.startDNSWorkers(runCtx, reqCh, &workerWG)
+	s.startDNSWorkers(runCtx, queues, &workerWG)
 
 	// DNS-over-TCP fallback on the same host:port, for clients on networks that
 	// filter or truncate UDP/53. Shares the transport-agnostic packet handler.
@@ -566,10 +615,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 	readErrCh := make(chan error, s.cfg.UDPReaders)
 	var readerWG sync.WaitGroup
-	s.startReaders(runCtx, conns, reqCh, readErrCh, &readerWG)
+	s.startReaders(runCtx, conns, queues, readErrCh, &readerWG)
 
 	readerWG.Wait()
-	close(reqCh)
+	close(queues.control)
+	close(queues.data)
 	workerWG.Wait()
 	cancel()
 	tcpWG.Wait()

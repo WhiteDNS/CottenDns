@@ -199,10 +199,27 @@ func (c *Client) buildSessionInitPayload() ([]byte, bool, [4]byte, error) {
 		payload[0] = mtuProbeBase64Reply
 	}
 	payload[1] = compression.PackPair(c.uploadCompression, c.downloadCompression)
-	binary.BigEndian.PutUint16(payload[2:4], uint16(c.syncedUploadMTU))
-	binary.BigEndian.PutUint16(payload[4:6], uint16(c.syncedDownloadMTU))
+	uploadMTU, downloadMTU := c.sessionInitAdvertisedMTUs()
+	binary.BigEndian.PutUint16(payload[2:4], uint16(uploadMTU))
+	binary.BigEndian.PutUint16(payload[4:6], uint16(downloadMTU))
 	copy(payload[6:10], verifyCode[:])
 	return payload, payload[0] == mtuProbeBase64Reply, verifyCode, nil
+}
+
+// sessionInitAdvertisedMTUs reports measured path capacity, not the previous
+// server's policy-clamped operating values. The accepting server applies its
+// current ceilings to the new session. This lets failover to an unrestricted
+// server recover full throughput immediately without another MTU scan.
+func (c *Client) sessionInitAdvertisedMTUs() (int, int) {
+	uploadMTU := c.discoveredUploadMTU
+	if uploadMTU <= 0 {
+		uploadMTU = c.syncedUploadMTU
+	}
+	downloadMTU := c.discoveredDownloadMTU
+	if downloadMTU <= 0 {
+		downloadMTU = c.syncedDownloadMTU
+	}
+	return uploadMTU, downloadMTU
 }
 
 func (c *Client) nextSessionInitAttempt() (Connection, []byte, [4]byte, error) {
@@ -461,11 +478,12 @@ func (c *Client) applySyncedMTUState(uploadMTU int, downloadMTU int, uploadChars
 	if c == nil {
 		return
 	}
+	c.discoveredUploadMTU = uploadMTU
+	c.discoveredDownloadMTU = downloadMTU
 	c.syncedUploadMTU = uploadMTU
 	c.syncedDownloadMTU = downloadMTU
 	c.syncedUploadChars = uploadChars
-	c.safeUploadMTU = computeSafeUploadMTU(uploadMTU, c.mtuCryptoOverhead)
-	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(uploadMTU, 80, c.effectiveMaxPacketsPerBatch())
+	c.refreshPolicyDerivedState()
 	c.applySessionCompressionPolicy()
 	if c.log != nil && c.successMTUChecks {
 		c.log.Infof("\U0001F4CF <green>MTU state applied: UP=%d, DOWN=%d</green>", uploadMTU, downloadMTU)

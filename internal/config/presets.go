@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"runtime"
 	"strings"
 )
 
@@ -202,13 +203,19 @@ func applyClientTCPSurvivalPreset(cfg *ClientConfig, isDefined configKeyDefinedF
 }
 
 func applyServerSpeedPreset(cfg *ServerConfig, isDefined configKeyDefinedFunc) {
+	cpus := max(runtime.NumCPU(), 1)
 	setServerBool(isDefined, "TCP_LISTENER_ENABLED", &cfg.TCPListenerEnabled, true)
 	setServerInt(isDefined, "TCP_MAX_CONNS", &cfg.TCPMaxConns, 4096)
 	setServerInt(isDefined, "TCP_MAX_CONNS_PER_IP", &cfg.TCPMaxConnsPerIP, 256)
 	setServerInt(isDefined, "TCP_MAX_QUERIES_PER_CONN", &cfg.TCPMaxQueriesPerConn, 0)
 	setServerFloat(isDefined, "TCP_READ_IDLE_TIMEOUT_SECONDS", &cfg.TCPReadIdleTimeoutSeconds, 45.0)
 	setServerFloat(isDefined, "TCP_WRITE_TIMEOUT_SECONDS", &cfg.TCPWriteTimeoutSeconds, 15.0)
-	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 32768)
+	// Keep the count limit consistent with the default 64 MiB ingress byte
+	// budget (16,384 pooled 4 KiB buffers). A deeper queue adds latency under
+	// overload rather than throughput.
+	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 16384)
+	setServerInt(isDefined, "UDP_READERS", &cfg.UDPReaders, min(max(cpus, 4), 16))
+	setServerInt(isDefined, "DNS_REQUEST_WORKERS", &cfg.DNSRequestWorkers, min(max(cpus*2, 8), 64))
 	setServerInt(isDefined, "MAX_PACKETS_PER_BATCH", &cfg.MaxPacketsPerBatch, 12)
 	setServerInt(isDefined, "ARQ_WINDOW_SIZE", &cfg.ARQWindowSize, 3000)
 	setServerFloat(isDefined, "ARQ_INITIAL_RTO_SECONDS", &cfg.ARQInitialRTOSeconds, 0.5)
@@ -228,7 +235,7 @@ func applyServerSurvivalPreset(cfg *ServerConfig, isDefined configKeyDefinedFunc
 	setServerInt(isDefined, "TCP_MAX_QUERIES_PER_CONN", &cfg.TCPMaxQueriesPerConn, 0)
 	setServerFloat(isDefined, "TCP_READ_IDLE_TIMEOUT_SECONDS", &cfg.TCPReadIdleTimeoutSeconds, 60.0)
 	setServerFloat(isDefined, "TCP_WRITE_TIMEOUT_SECONDS", &cfg.TCPWriteTimeoutSeconds, 20.0)
-	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 32768)
+	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 16384)
 	setServerInt(isDefined, "MAX_PACKETS_PER_BATCH", &cfg.MaxPacketsPerBatch, 8)
 	setServerInt(isDefined, "PACKET_BLOCK_CONTROL_DUPLICATION", &cfg.PacketBlockControlDuplication, 2)
 	setServerBool(isDefined, "FEC_AUTO_ENABLED", &cfg.FECAutoEnabled, true)
@@ -248,7 +255,7 @@ func applyServerTCPSurvivalPreset(cfg *ServerConfig, isDefined configKeyDefinedF
 	setServerInt(isDefined, "TCP_MAX_QUERIES_PER_CONN", &cfg.TCPMaxQueriesPerConn, 0)
 	setServerFloat(isDefined, "TCP_READ_IDLE_TIMEOUT_SECONDS", &cfg.TCPReadIdleTimeoutSeconds, 75.0)
 	setServerFloat(isDefined, "TCP_WRITE_TIMEOUT_SECONDS", &cfg.TCPWriteTimeoutSeconds, 20.0)
-	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 32768)
+	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 16384)
 	setServerInt(isDefined, "MAX_PACKETS_PER_BATCH", &cfg.MaxPacketsPerBatch, 12)
 	setServerInt(isDefined, "ARQ_WINDOW_SIZE", &cfg.ARQWindowSize, 3000)
 	setServerFloat(isDefined, "ARQ_INITIAL_RTO_SECONDS", &cfg.ARQInitialRTOSeconds, 0.5)

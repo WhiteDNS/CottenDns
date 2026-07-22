@@ -76,10 +76,49 @@ func (c *Client) applyServerClientPolicy(payload []byte) {
 // goroutine before sessionReady is set, so this write lands before the send
 // path can read it.
 func (c *Client) refreshPolicyDerivedState() {
-	if c == nil || c.syncedUploadMTU <= 0 {
+	if c == nil {
 		return
 	}
+	if c.discoveredUploadMTU <= 0 {
+		c.discoveredUploadMTU = c.syncedUploadMTU
+	}
+	if c.discoveredDownloadMTU <= 0 {
+		c.discoveredDownloadMTU = c.syncedDownloadMTU
+	}
+	c.syncedUploadMTU = c.effectivePolicyMTU(c.discoveredUploadMTU, true)
+	c.syncedDownloadMTU = c.effectivePolicyMTU(c.discoveredDownloadMTU, false)
+	c.tunnelRX_TX_Workers = c.effectiveRxTxWorkers()
+	if c.syncedUploadMTU <= 0 {
+		return
+	}
+	c.safeUploadMTU = computeSafeUploadMTU(c.syncedUploadMTU, c.mtuCryptoOverhead)
 	c.maxPackedBlocks = VpnProto.CalculateMaxPackedBlocks(c.syncedUploadMTU, 80, c.effectiveMaxPacketsPerBatch())
+}
+
+func (c *Client) effectivePolicyMTU(discovered int, upload bool) int {
+	if discovered <= 0 {
+		return discovered
+	}
+	policy := c.serverPolicySnapshot()
+	if policy == nil {
+		return discovered
+	}
+	ceiling := policy.MaxDownloadMTU
+	if upload {
+		ceiling = policy.MaxUploadMTU
+	}
+	return policyMaxInt(discovered, ceiling)
+}
+
+func (c *Client) effectiveRxTxWorkers() int {
+	workers := c.cfg.RX_TX_Workers
+	if workers < 1 {
+		workers = 1
+	}
+	if policy := c.serverPolicySnapshot(); policy != nil {
+		workers = policyMaxInt(workers, policy.MaxRxTxWorkers)
+	}
+	return workers
 }
 
 // serverPolicySnapshot returns the active policy, or nil when the server stated

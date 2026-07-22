@@ -153,4 +153,9 @@ func TestIngressAdmissionKeepsDynamicClientCompatibility(t *testing.T) {
 			}
 		}
 	}
+	for _, method := range methods {
+		if got := s.codecAccepted[method].Load(); got == 0 {
+			t.Fatalf("method %d was accepted but not recorded", method)
+		}
+	}
 }

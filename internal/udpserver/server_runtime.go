@@ -13,8 +13,10 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	Enums "cottendns-go/internal/enums"
 	"cottendns-go/internal/logger"
 )
 
@@ -28,17 +30,16 @@ func (s *Server) configureSocketBuffers(conn *net.UDPConn) {
 	}
 }
 
-func (s *Server) startDNSWorkers(ctx context.Context, reqCh <-chan request, workerWG *sync.WaitGroup) {
+func (s *Server) startDNSWorkers(ctx context.Context, queues ingressQueues, workerWG *sync.WaitGroup) {
 	for i := range s.cfg.DNSRequestWorkers {
 		workerWG.Add(1)
 		go func(workerID int) {
 			defer workerWG.Done()
-			s.dnsWorker(ctx, reqCh, workerID)
+			s.dnsWorker(ctx, queues, workerID)
 		}(i + 1)
 	}
 }
 
-// listenUDP opens the listening sockets. With SO_REUSEPORT available it opens
 // udpSocketCount decides how many SO_REUSEPORT sockets to open for a given
 // reader count. It is deliberately not one-per-reader.
 //
@@ -49,22 +50,25 @@ func (s *Server) startDNSWorkers(ctx context.Context, reqCh <-chan request, work
 // admitIngressPacket, which attempts decryption. That would make one busy client
 // slower than it was on the old shared socket, where all readers could pull from
 // the same queue. Capping sockets below the reader count leaves the surplus
-// readers doubled up on shared sockets, so no flow is ever pinned to a single
-// CPU's worth of decrypt.
+// readers share sockets, so a flow can be drained by more than one decrypt loop.
 //
 // The cap is the CPU count because queue-splitting past the number of cores that
 // can drain those queues buys nothing and only multiplies SO_RCVBUF memory.
 func udpSocketCount(readers int) int {
-	if readers < 2 {
+	if readers < 3 {
 		return 1
 	}
-	if cpus := runtime.NumCPU(); readers > cpus {
-		if cpus < 1 {
-			return 1
-		}
-		return cpus
+	// Keep at least two readers sharing each socket. SO_REUSEPORT hashes a
+	// stable resolver flow to one socket; one socket per reader would therefore
+	// pin that flow to one decrypt loop and regress the old shared-socket path.
+	sockets := readers / 2
+	if sockets < 1 {
+		sockets = 1
 	}
-	return readers
+	if cpus := runtime.NumCPU(); cpus > 0 && sockets > cpus {
+		sockets = cpus
+	}
+	return sockets
 }
 
 // listenUDP opens the listening sockets. With SO_REUSEPORT available it opens
@@ -106,13 +110,13 @@ func (s *Server) listenUDP(addr *net.UDPAddr) ([]*net.UDPConn, error) {
 
 // startReaders runs one reader per socket when SO_REUSEPORT gave us a socket
 // each, and otherwise fans every reader onto the single shared socket.
-func (s *Server) startReaders(ctx context.Context, conns []*net.UDPConn, reqCh chan<- request, readErrCh chan<- error, readerWG *sync.WaitGroup) {
+func (s *Server) startReaders(ctx context.Context, conns []*net.UDPConn, queues ingressQueues, readErrCh chan<- error, readerWG *sync.WaitGroup) {
 	for i := range s.cfg.UDPReaders {
 		conn := conns[i%len(conns)]
 		readerWG.Add(1)
 		go func(readerID int, conn *net.UDPConn) {
 			defer readerWG.Done()
-			if err := s.readLoop(ctx, conn, reqCh, readerID); err != nil {
+			if err := s.readLoop(ctx, conn, queues, readerID); err != nil {
 				select {
 				case readErrCh <- err:
 				default:
@@ -211,7 +215,7 @@ func (s *Server) deferredIdleCleanupTimeout(cleanupInterval time.Duration, sessi
 	return idle
 }
 
-func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, reqCh chan<- request, readerID int) error {
+func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, queues ingressQueues, readerID int) error {
 	for {
 		buffer := s.packetPool.Get().([]byte)
 		n, addr, err := conn.ReadFromUDP(buffer)
@@ -235,49 +239,161 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, reqCh chan<- r
 		// worker queue. This ordering is essential on public UDP/53: queueing a
 		// full-size receive buffer before classification lets a packet flood turn
 		// MAX_CONCURRENT_REQUESTS into a multi-gigabyte memory reservation.
-		if !s.admitIngressPacket(buffer[:n]) {
+		prepared, ok := s.prepareIngressPacket(buffer[:n])
+		if !ok {
 			s.ingressRejectedPackets.Add(1)
 			s.packetPool.Put(buffer)
 			continue
 		}
 
+		req := request{buf: buffer, size: n, addr: addr, conn: conn, prepared: prepared, admitted: time.Now()}
+		s.ingressPreparedPackets.Add(1)
+		if s.enqueueIngressRequest(req, queues) {
+			continue
+		}
+
 		select {
-		case reqCh <- request{buf: buffer, size: n, addr: addr, conn: conn}:
 		case <-ctx.Done():
 			s.packetPool.Put(buffer)
 			return nil
 		default:
 			s.packetPool.Put(buffer)
-			s.onDrop(addr, len(reqCh), cap(reqCh))
+			s.onDrop(addr, len(queues.control)+len(queues.data), cap(queues.control)+cap(queues.data))
 		}
 	}
 }
 
-func (s *Server) dnsWorker(ctx context.Context, reqCh <-chan request, workerID int) {
-	for {
+func (s *Server) enqueueIngressRequest(req request, queues ingressQueues) bool {
+	if isBulkIngressPacket(req.prepared.packet.PacketType) {
+		select {
+		case queues.data <- req:
+			depth := s.ingressDataDepth.Add(1)
+			updateHighWater(&s.ingressDataHighWater, uint64(depth))
+			return true
+		default:
+			return false
+		}
+	}
+
+	// Latency-sensitive traffic may borrow an idle data lane, while bulk traffic
+	// cannot consume the reserved control lane. Once any data is queued, control
+	// stops spilling into that FIFO; duplicated control packets therefore cannot
+	// build a wall in front of user data. Concurrent readers can race this check,
+	// but the spill remains bounded by the small reader count.
+	select {
+	case queues.control <- req:
+		depth := s.ingressControlDepth.Add(1)
+		updateHighWater(&s.ingressControlHighWater, uint64(depth))
+		return true
+	default:
+	}
+	if len(queues.data) != 0 {
+		return false
+	}
+	select {
+	case queues.data <- req:
+		depth := s.ingressDataDepth.Add(1)
+		updateHighWater(&s.ingressDataHighWater, uint64(depth))
+		return true
+	default:
+		return false
+	}
+}
+
+func isBulkIngressPacket(packetType uint8) bool {
+	return packetType == Enums.PACKET_STREAM_DATA || packetType == Enums.PACKET_STREAM_RESEND || packetType == Enums.PACKET_FEC_SHARD
+}
+
+func updateHighWater(dst *atomic.Uint64, value uint64) {
+	for current := dst.Load(); value > current; current = dst.Load() {
+		if dst.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
+func (s *Server) dnsWorker(ctx context.Context, queues ingressQueues, workerID int) {
+	controlCh, dataCh := queues.control, queues.data
+	controlBurst := 0
+	for controlCh != nil || dataCh != nil {
+		var req request
+		var ok bool
+		var control bool
+
+		if controlBurst >= 4 && dataCh != nil {
+			select {
+			case req, ok = <-dataCh:
+				if !ok {
+					dataCh = nil
+					continue
+				}
+			default:
+			}
+			if ok {
+				s.ingressDataDepth.Add(-1)
+				controlBurst = 0
+				s.processIngressRequest(req, workerID)
+				continue
+			}
+		}
+
+		if controlBurst < 4 && controlCh != nil {
+			select {
+			case req, ok = <-controlCh:
+				if !ok {
+					controlCh = nil
+					continue
+				}
+				control = true
+			default:
+			}
+			if control {
+				s.ingressControlDepth.Add(-1)
+				controlBurst++
+				s.processIngressRequest(req, workerID)
+				continue
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case req, ok := <-reqCh:
+		case req, ok = <-controlCh:
 			if !ok {
-				return
+				controlCh = nil
+				continue
 			}
-
-			response := s.safeHandlePacket(req.buf[:req.size])
-			if len(response) != 0 {
-				if _, err := req.conn.WriteToUDP(response, req.addr); err != nil {
-					s.log.Debugf(
-						"\U0001F4A5 <yellow>UDP Write Error, Worker: <cyan>%d</cyan>, Remote: <cyan>%v</cyan>, Error: <cyan>%v</cyan></yellow>",
-						workerID,
-						req.addr,
-						err,
-					)
-				}
+			s.ingressControlDepth.Add(-1)
+			controlBurst++
+		case req, ok = <-dataCh:
+			if !ok {
+				dataCh = nil
+				continue
 			}
+			s.ingressDataDepth.Add(-1)
+			controlBurst = 0
+		}
+		s.processIngressRequest(req, workerID)
+	}
+}
 
-			s.packetPool.Put(req.buf)
+func (s *Server) processIngressRequest(req request, workerID int) {
+	response := s.safeHandlePreparedIngress(req.buf[:req.size], req.prepared)
+	if len(response) != 0 {
+		if _, err := req.conn.WriteToUDP(response, req.addr); err != nil {
+			s.log.Debugf(
+				"\U0001F4A5 <yellow>UDP Write Error, Worker: <cyan>%d</cyan>, Remote: <cyan>%v</cyan>, Error: <cyan>%v</cyan></yellow>",
+				workerID,
+				req.addr,
+				err,
+			)
 		}
 	}
+	if !req.admitted.IsZero() {
+		s.ingressLatencyNanos.Add(uint64(time.Since(req.admitted)))
+		s.ingressLatencySamples.Add(1)
+	}
+	s.packetPool.Put(req.buf)
 }
 
 func (s *Server) safeHandlePacket(packet []byte) (response []byte) {
@@ -294,6 +410,18 @@ func (s *Server) safeHandlePacket(packet []byte) (response []byte) {
 	}()
 
 	return s.handlePacket(packet)
+}
+
+func (s *Server) safeHandlePreparedIngress(packet []byte, prepared preparedIngress) (response []byte) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if s.log != nil {
+				s.log.Errorf("\U0001F4A5 <red>Prepared Packet Handler Panic Recovered, <yellow>%v</yellow></red>", recovered)
+			}
+			response = nil
+		}
+	}()
+	return s.handlePreparedIngress(packet, prepared)
 }
 
 func (s *Server) onDrop(addr *net.UDPAddr, queueLen int, queueCap int) {

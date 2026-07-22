@@ -77,8 +77,12 @@ type Client struct {
 	// MTU States
 	syncedUploadMTU   int
 	syncedDownloadMTU int
-	syncedUploadChars int
-	safeUploadMTU     int
+	// Preserve the measured path MTU while a server policy clamps the active
+	// session values, so policy withdrawal can restore it without re-probing.
+	discoveredUploadMTU   int
+	discoveredDownloadMTU int
+	syncedUploadChars     int
+	safeUploadMTU         int
 	// mtuGroups holds the resolver clusters from the last MTU scan (Layer 2 of
 	// the adaptive per-group MTU strategy). Informational today: it is computed
 	// and logged but does not yet drive routing or per-group MTU selection.
@@ -138,7 +142,7 @@ type Client struct {
 	// nil when it stated none. Published atomically because it is written on
 	// the init collector goroutine while the send path, stream setup and ping
 	// manager are already reading the values it governs.
-	serverPolicy atomic.Pointer[VpnProto.SessionAcceptClientPolicy]
+	serverPolicy        atomic.Pointer[VpnProto.SessionAcceptClientPolicy]
 	runtimeResetPending atomic.Bool
 	sessionResetSignal  chan struct{}
 	rxDroppedPackets    atomic.Uint64

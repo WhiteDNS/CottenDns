@@ -34,6 +34,12 @@ func (c *Client) directionalDuplicationCounts() (uploadData, downloadData, uploa
 	if downloadSetup < downloadData {
 		downloadSetup = downloadData
 	}
+	if policy := c.serverPolicySnapshot(); policy != nil {
+		uploadData = policyMaxInt(uploadData, policy.MaxPacketDuplicationCount)
+		downloadData = policyMaxInt(downloadData, policy.MaxPacketDuplicationCount)
+		uploadSetup = policyMaxInt(uploadSetup, policy.MaxSetupDuplicationCount)
+		downloadSetup = policyMaxInt(downloadSetup, policy.MaxSetupDuplicationCount)
+	}
 	return uploadData, downloadData, uploadSetup, downloadSetup
 }
 

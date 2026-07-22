@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -172,6 +172,12 @@ func TestFinalizeAfterARQCloseClearsTXQueue(t *testing.T) {
 	}
 	if stream.TXQueue.Size() != 0 {
 		t.Fatalf("expected TX queue to be cleared, got %d", stream.TXQueue.Size())
+	}
+	if stream.PushTXPacket(Enums.DefaultPacketPriority(Enums.PACKET_STREAM_RST), Enums.PACKET_STREAM_RST, 6, 0, 0, 0, 0, nil) {
+		t.Fatal("closed stream accepted a packet after TX teardown")
+	}
+	if stream.TXQueue.Size() != 0 {
+		t.Fatalf("closed stream retained %d packets after teardown", stream.TXQueue.Size())
 	}
 	if stream.ARQ != nil && !stream.ARQ.IsClosed() {
 		t.Fatal("expected ARQ to be closed")
@@ -905,6 +911,7 @@ func TestClosedSessionRecordRejectsPostCloseStreamAccess(t *testing.T) {
 // the production insert path so the active-set sweeps see it.
 func putTestSession(s *sessionStore, record *sessionRecord) {
 	s.byID[record.ID] = record
+	s.liveByID[record.ID].Store(record)
 	if s.activeIDs == nil {
 		s.activeIDs = make(map[uint16]struct{})
 	}

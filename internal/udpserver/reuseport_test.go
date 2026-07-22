@@ -39,6 +39,9 @@ func TestUDPSocketCountNeverStarvesOrOversubscribes(t *testing.T) {
 	if udpSocketCount(1) != 1 {
 		t.Fatal("a single reader must use exactly one socket")
 	}
+	if got := udpSocketCount(7); got != min(3, cpus) {
+		t.Fatalf("seven readers: socket count %d, want %d so readers share queues", got, min(3, cpus))
+	}
 	// Far more readers than cores must collapse onto the CPU cap, leaving
 	// multiple readers per socket rather than one flow per reader.
 	if got := udpSocketCount(cpus * 8); got != cpus {

@@ -56,7 +56,7 @@ func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacke
 	// authenticated methods before any unauthenticated one and costs a single
 	// attempt for the common single-method deployment.
 	startIdx := int(s.preferredCodec.Load())
-	vpnPacket, codecIdx, err := VpnProto.ParseInflatedFromLabelsAny(decision.Labels, s.codecs, startIdx)
+	vpnPacket, codecIdx, err := VpnProto.ParseInflatedFromLabelsAnyMatching(decision.Labels, s.codecs, startIdx, s.matchesInboundPacketCandidate)
 	if err != nil {
 		if errors.Is(err, VpnProto.ErrInvalidFragmentInfo) {
 			s.fragmentInvalidHeader.Add(1)
@@ -66,6 +66,22 @@ func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacke
 	if codecIdx != startIdx {
 		s.preferredCodec.Store(int32(codecIdx))
 	}
+	return s.handleDecodedTunnelPacket(packet, parsed, decision, vpnPacket)
+}
+
+func (s *Server) handlePreparedIngress(packet []byte, prepared preparedIngress) []byte {
+	vpnPacket, err := VpnProto.InflatePayload(prepared.packet)
+	if err != nil {
+		if errors.Is(err, VpnProto.ErrInvalidFragmentInfo) {
+			s.fragmentInvalidHeader.Add(1)
+		}
+		s.ingressInflateFailures.Add(1)
+		return s.buildNoDataResponseLiteLogged(packet, prepared.parsed, "vpn-proto-inflate-failed")
+	}
+	return s.handleDecodedTunnelPacket(packet, prepared.parsed, prepared.decision, vpnPacket)
+}
+
+func (s *Server) handleDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
 
 	if vpnPacket.PacketType == Enums.PACKET_SESSION_CLOSE {
 		s.handleSessionCloseNotice(vpnPacket, time.Now())
@@ -95,4 +111,30 @@ func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacke
 	default:
 		return s.buildNoDataResponseLiteLogged(packet, parsed, fmt.Sprintf("pre-session-unhandled-%s", Enums.PacketTypeName(vpnPacket.PacketType)))
 	}
+}
+
+// matchesInboundPacketCandidate resolves the protocol's format ambiguity using
+// state the wire itself does not carry. Established packets must match the ID,
+// cookie and format of a live or recently closed session. Pre-session packets
+// have ID zero and strict payload shapes, which also distinguishes their native
+// and legacy layouts without another round trip or an extra wire byte.
+func (s *Server) matchesInboundPacketCandidate(packet VpnProto.Packet) bool {
+	if s == nil {
+		return false
+	}
+
+	switch packet.PacketType {
+	case Enums.PACKET_SESSION_INIT:
+		return packet.SessionID == 0 && len(packet.Payload) == sessionInitDataSize
+	case Enums.PACKET_MTU_UP_REQ:
+		return packet.SessionID == 255 && len(packet.Payload) >= mtuProbeUpMinSize
+	case Enums.PACKET_MTU_DOWN_REQ:
+		return packet.SessionID == 255 && len(packet.Payload) >= mtuProbeDownMinSize
+	}
+
+	if packet.SessionID == 0 {
+		return false
+	}
+	lookup, ok := s.sessions.Lookup(packet.SessionID)
+	return ok && lookup.Cookie == packet.SessionCookie && lookup.LegacySessionID == packet.LegacySessionID
 }

@@ -51,6 +51,34 @@ func TestLegacySessionIDRoundTrips(t *testing.T) {
 	}
 }
 
+func TestNativeMTUProbeSentinelRemainsNative(t *testing.T) {
+	for _, packetType := range []uint8{
+		Enums.PACKET_MTU_UP_REQ,
+		Enums.PACKET_MTU_UP_RES,
+		Enums.PACKET_MTU_DOWN_REQ,
+		Enums.PACKET_MTU_DOWN_RES,
+	} {
+		raw, err := BuildRaw(BuildOptions{
+			SessionID:      255,
+			PacketType:     packetType,
+			StreamID:       1,
+			SequenceNum:    1,
+			TotalFragments: 1,
+			Payload:        []byte{0, 1, 2, 3, 4, 0, 30},
+		})
+		if err != nil {
+			t.Fatalf("packet type %d BuildRaw: %v", packetType, err)
+		}
+		packet, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("packet type %d Parse: %v", packetType, err)
+		}
+		if packet.LegacySessionID || packet.SessionID != 255 || packet.PacketType != packetType {
+			t.Fatalf("packet type %d parsed incorrectly: %+v", packetType, packet)
+		}
+	}
+}
+
 // Native frames must not regress into the legacy layout now that parsing tries
 // both. Native session IDs live above the legacy range by allocator contract.
 func TestNativeSessionIDStillPreferred(t *testing.T) {

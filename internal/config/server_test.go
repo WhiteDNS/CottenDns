@@ -14,6 +14,34 @@ import (
 	"testing"
 )
 
+func TestServerClientPolicyRangesAreWireSafe(t *testing.T) {
+	cfg := defaultServerConfig()
+	cfg.MaxAllowedClientPacketDuplication = 99
+	cfg.MaxAllowedClientSetupPacketDuplication = -2
+	cfg.MaxAllowedClientUploadMTU = 70000
+	cfg.MaxAllowedClientDownloadMTU = 70000
+	cfg.MaxAllowedClientRxTxWorkers = 999
+	cfg.MinAllowedClientPingAggressiveInterval = 8
+	cfg.MaxAllowedClientPacketsPerBatch = 999
+	cfg.MaxAllowedClientARQWindowSize = 999999
+	cfg.MaxAllowedClientARQDataNackMaxGap = 999
+	cfg.MinAllowedClientCompressionMinSize = 999999
+	cfg.MinAllowedClientARQInitialRTOSeconds = 8
+
+	got, err := finalizeServerConfig(cfg)
+	if err != nil {
+		t.Fatalf("finalizeServerConfig: %v", err)
+	}
+	if got.MaxAllowedClientPacketDuplication != 15 || got.MaxAllowedClientSetupPacketDuplication != 0 ||
+		got.MaxAllowedClientUploadMTU != 255 || got.MaxAllowedClientDownloadMTU != 4096 ||
+		got.MaxAllowedClientRxTxWorkers != 255 || got.MinAllowedClientPingAggressiveInterval != 1 ||
+		got.MaxAllowedClientPacketsPerBatch != 255 || got.MaxAllowedClientARQWindowSize != 65535 ||
+		got.MaxAllowedClientARQDataNackMaxGap != 255 || got.MinAllowedClientCompressionMinSize != 65535 ||
+		got.MinAllowedClientARQInitialRTOSeconds != 1 {
+		t.Fatalf("policy was not clamped to wire-safe ranges: %+v", got)
+	}
+}
+
 func TestLoadServerConfigWithOverridesAppliesFlagPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "server_config.toml")
@@ -127,6 +155,12 @@ TCP_MAX_CONNS_PER_IP = 64
 	}
 	if cfg.TCPMaxConns != 4096 || cfg.MaxPacketsPerBatch != 12 {
 		t.Fatalf("speed preset not applied: tcpMax=%d batch=%d", cfg.TCPMaxConns, cfg.MaxPacketsPerBatch)
+	}
+	if cfg.MaxConcurrentRequests != 16384 {
+		t.Fatalf("speed preset queue count = %d, want byte-budget-compatible 16384", cfg.MaxConcurrentRequests)
+	}
+	if cfg.UDPReaders < 4 || cfg.UDPReaders > 16 || cfg.DNSRequestWorkers < 8 || cfg.DNSRequestWorkers > 64 {
+		t.Fatalf("speed preset worker sizing out of range: readers=%d workers=%d", cfg.UDPReaders, cfg.DNSRequestWorkers)
 	}
 	if cfg.TCPMaxConnsPerIP != 32 {
 		t.Fatalf("explicit override should win over preset, got %d", cfg.TCPMaxConnsPerIP)
