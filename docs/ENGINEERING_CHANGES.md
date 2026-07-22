@@ -755,7 +755,228 @@ than before.
 
 ---
 
+## 18. Native sessions, dynamic compatibility, and server scalability
+
+This pass raised the capacity available to native CottenDNS clients without
+turning the server into a native-only endpoint. The server still determines the
+packet/session layout from the packet it receives and continues to answer legacy
+clients on their historical format.
+
+### 18.1 Native capacity without a legacy-client flag day
+
+- Native clients use the two-byte session-ID layout and can use the complete
+  16-bit session namespace.
+- Legacy one-byte session frames remain parseable. Candidate validation uses
+  packet semantics and existing session state instead of assuming that every
+  client was upgraded at once.
+- Session init, reuse, close, stream setup, data, ACK/NACK, DNS, and encrypted
+  packet tests cover both layouts. UDP, TCP/53, DoT, and DoH all enter the same
+  transport-independent packet handler after framing is removed.
+- `MAX_ACTIVE_SESSIONS` (default 2048) is deliberately separate from the 65535
+  ID slots. The wider namespace prevents collisions; the live-session cap
+  prevents an init flood from turning the namespace into an unbounded memory
+  commitment.
+
+The result is dynamic compatibility: a server can give a native client its
+larger session space while an old client continues to work without changing a
+server mode or receiving a new mandatory field.
+
+### 18.2 Optional server policy, never a hidden client throttle
+
+The server can append resource ceilings to `SESSION_ACCEPT` for cooperating
+clients: duplication, setup duplication, upload/download MTU, RX/TX workers,
+minimum ping interval, packets per batch, ARQ window/NACK gap, compression
+threshold, and initial RTO.
+
+Every policy value defaults to zero (no stated limit). If all values are zero,
+the policy block is omitted and `SESSION_ACCEPT` remains byte-for-byte compatible
+with earlier clients. A native client publishes a received policy atomically and
+clamps values at their actual use sites, avoiding a race with already-running
+send, ping, and stream goroutines. Removing a policy on a later session also
+clears the old snapshot rather than leaving a client permanently throttled.
+
+These controls are overload safeguards, not speed knobs. The maximum-speed
+configuration leaves them at zero. In particular, lowering the packets-per-batch
+ceiling can create *more* DNS queries, so it must not be used as a generic rate
+limit.
+
+### 18.3 Bounded ingress and fair overload behavior
+
+The UDP front door was split into cheap admission and bounded processing:
+
+1. A reader parses the DNS question, checks the delegated domain, resolves the
+   dynamic codec/header layout, and decrypts enough to validate the tunnel frame.
+2. Only admitted frames consume bounded worker-queue space. The prepared parse
+   result is retained, so workers do not repeat DNS parsing, codec trials, or
+   decryption.
+3. Decompression, session mutation, and response generation remain on bounded
+   workers.
+
+`MAX_INGRESS_QUEUE_BYTES` bounds queued backing buffers in addition to the
+request-count limit. The default 4096-byte packet-pool ceiling is far above a DNS
+query while avoiding the old worst case where every queue slot retained a
+65535-byte array.
+
+Ingress has separate control and data lanes. Control traffic receives reserved
+capacity so ACK/NACK, setup, ping, and close packets can make progress while data
+is busy. However, duplicated control packets cannot permanently occupy the data
+lane: control spills into that lane only while no data is waiting. This preserves
+recovery under overload without letting duplication reduce a user's useful data
+rate. Drop counters, queue gauges, and rate-limited overload logs make saturation
+observable.
+
+### 18.4 UDP receive scaling without single-flow slowdown
+
+On platforms with `SO_REUSEPORT`, the server opens multiple kernel receive
+queues, but intentionally not one socket per reader. The count is:
+
+```
+max(1, min(UDP_READERS / 2, runtime.NumCPU()))
+```
+
+At least two readers therefore share each socket. Since the kernel hashes a
+resolver flow to one reuse-port socket, a busy flow can still be drained by more
+than one decrypt loop instead of being pinned to one reader. Platforms without
+reuse-port, single-reader configurations, or partial bind failures fall back to
+one shared socket with all readers attached. TCP/53, DoT, and DoH retain their
+own connection budgets and are not coupled to this UDP-only socket topology.
+
+---
+
+## 19. Native-client recovery, connectivity, and throughput pass
+
+The client data path was audited across UDP, TCP/53, DoT, and DoH. The changes
+below do not add fields to DNS packets and do not require a server upgrade.
+
+### 19.1 Runtime path and MTU recovery
+
+Initial discovery is no longer the only time the client can choose a working
+path. A runtime recovery controller can repeat resolver/transport/MTU discovery
+when:
+
+- session initialization repeatedly fails;
+- the ping watchdog sees no useful progress; or
+- every mature active resolver has reached its timeout window.
+
+Recovery has a 15-second cooldown so several symptoms collapse into one scan.
+Explicit `udp` and `tcp` settings remain explicit: recovery re-probes the same
+transport and its usable MTU rather than silently changing the user's choice.
+`auto`, `dot`, and `doh` retain their configured fallback chains. Successful
+recovery resets session state and reconnects on the newly measured path.
+
+Session-init racing and tunneled exchanges are cancellable. Once one attempt
+wins, losing requests stop consuming sockets, HTTP requests, and queue space.
+
+### 19.2 Persistent, priority-aware stream transports
+
+- **DoH:** one long-lived HTTP/2-capable client/transport is shared for the
+  client's lifetime instead of creating and closing a client per DNS query.
+  Sixteen bounded workers drain separate control and data queues (64 and 256
+  entries), preserving control progress while bounding memory and concurrency.
+- **TCP/53 and DoT:** eight bounded send workers use two persistent connection
+  stripes per resolver. Control and data queues are separated, and immediate
+  dial/write failures are reported to resolver health instead of waiting for a
+  later generic timeout.
+- Stream transports no longer allocate unused UDP sockets. All transports feed
+  the same inbound channel and packet handler, preserving identical ARQ/session
+  semantics.
+
+Queue admission is intentionally bounded. A shed request is recoverable through
+ARQ; an unbounded backlog would instead make every user slow long after the
+original burst ended.
+
+### 19.3 Path-specific carrier selection
+
+DNS record-type selection now learns per resolver/domain path. A resolver that
+handles TXT well but drops HTTPS records no longer biases every other resolver,
+and a failure on one domain/path does not globally suppress a useful carrier.
+Aggregate telemetry is retained for operator visibility, while the actual choice
+uses the path-local history.
+
+### 19.4 Duplication cooperates with FEC
+
+The speed preset starts upload and download data duplication at one copy. The
+adaptive controller can still add redundancy when measured loss justifies it,
+and explicit user values remain accepted. When recent downstream FEC is present,
+ACK/NACK duplication is capped at two: FEC has already paid redundancy up front,
+so multiplying recovery control packets further would consume bandwidth without
+improving delivery. Setup/control reliability remains protected independently.
+
+This is the key rule behind the new defaults: duplication is a loss response,
+not a permanent speed multiplier. On a healthy or bandwidth-limited link, extra
+copies reduce useful throughput.
+
+### 19.5 Smaller allocations and compression decisions
+
+- Receive buffers are pooled and sized from the discovered download MTU plus
+  safety space, with an 8192-byte floor and 65535-byte hard ceiling. Direct or
+  legacy paths without a discovered MTU retain the safe maximum.
+- Compression estimates entropy before invoking ZSTD/LZ4/ZLIB. Payloads above
+  the 7.6 bits/byte threshold are already effectively compressed or encrypted,
+  so skipping the codec saves CPU and avoids expansion.
+- Watchdog defaults were reduced from five minutes to 30 seconds; the speed and
+  survival presets use 20 and 15 seconds. A dead resolver/path is therefore
+  rediscovered on a useful timescale for unstable mobile networks.
+
+### 19.6 Operational telemetry
+
+Periodic traffic statistics now include the active transport, control/data
+queue depths, RX/TX admission drops, recovery count, and stream dial/write
+failures. These distinguish four very different problems that previously looked
+like generic loss: resolver failure, local queue saturation, connection failure,
+and actual tunnel packet loss.
+
+---
+
+## 20. Android native-engine integration (`v1.5.1c-rc13`)
+
+The Android `cottendns-engine-ui` branch vendors the same native client recovery
+and transport changes while preserving its Android-specific fast-connect flow,
+resolver injection/progress logging, and executable/TOML boundary.
+
+Android-side behavior was aligned with the engine:
+
+- New/fresh profiles and launch-request fallback values use upload duplication
+  1, download duplication 1, and a 30-second watchdog.
+- Auto-tune profiles start data duplication at 1 and let the native adaptive
+  controller raise it from measured loss instead of imposing a permanent
+  3-30-copy bandwidth penalty.
+- Native CottenDNS profiles emit adaptive duplication and distinct-domain
+  preference. Compatibility mode explicitly leaves adaptive duplication off,
+  preserving legacy-client behavior and user-selected settings.
+- The app parses and displays the new transport, queue, drop, recovery, and
+  stream-connection telemetry.
+
+The Android vendored Go engine passed `go test ./...`, `go vet ./...`, and the
+native client build. The release workflow then rebuilt all Android ABIs with the
+NDK, ran Android unit tests, produced signed split/universal APKs, verified their
+signatures, and published checksums in both Android repositories.
+
+---
+
+## 21. Reuse-port CI correction and final validation
+
+The reuse-port socket-count test originally asserted the obsolete design of one
+socket per UDP reader. Production had already moved to the deliberate
+`UDP_READERS/2`, CPU-capped topology described in section 18.4. GitHub's two-core
+runner therefore opened the correct two sockets for four readers while the stale
+test expected four.
+
+The test now derives its expectation from `udpSocketCount`; production network
+code was not weakened or changed. Validation after the correction included:
+
+- the complete Go test suite in both CottenDNS mirrors;
+- race-sensitive ARQ, client, and UDP-server tests;
+- `go vet`, static analysis, and client/server builds;
+- the live end-to-end tunnel test;
+- installer, Compose, container-health, and legacy-upgrade contracts;
+- the complete cross-platform release matrix and multi-architecture server
+  container publication; and
+- signed Android `v1.5.1c-rc13` releases in both Android repositories.
+
+---
+
 *All changes keep ARQ as the correctness backstop; every optimization above is
-designed to fail safe — if FEC, MTU grouping, or a transport channel does not
-help on a given path, the tunnel still delivers via ARQ over the surviving
-resolvers.*
+designed to fail safe — if FEC, MTU grouping, a carrier, or a transport channel
+does not help on a given path, the tunnel still delivers through the surviving
+resolver/path combination.*
