@@ -22,11 +22,12 @@ type externalSOCKSUDPAssociation struct {
 	readPending []byte
 	validated   map[string]time.Time
 	closeOnce   sync.Once
+	monitor     *Server
 }
 
 func (s *Server) newUDPAssociationContext(ctx context.Context) (io.ReadWriteCloser, error) {
 	if !s.useExternalSOCKS5 {
-		return newUDPAssociationConn(), nil
+		return newUDPAssociationConn(s), nil
 	}
 	return s.newExternalSOCKSUDPAssociation(ctx)
 }
@@ -95,7 +96,10 @@ func (s *Server) newExternalSOCKSUDPAssociation(ctx context.Context) (*externalS
 		control:   control,
 		relay:     relay,
 		validated: make(map[string]time.Time),
+		monitor:   s,
 	}
+	s.genericUDPActive.Add(1)
+	s.genericUDPTotal.Add(1)
 	go func() {
 		var one [1]byte
 		_, _ = control.Read(one[:])
@@ -183,6 +187,9 @@ func (c *externalSOCKSUDPAssociation) Write(p []byte) (int, error) {
 		c.mu.Unlock()
 		if validatedAt.IsZero() || now.Sub(validatedAt) >= udpEndpointIdleTimeout {
 			if _, err := resolvePublicUDPAddr(host, port); err != nil {
+				if c.monitor != nil {
+					c.monitor.genericUDPErrors.Add(1)
+				}
 				continue
 			}
 			c.mu.Lock()
@@ -192,7 +199,14 @@ func (c *externalSOCKSUDPAssociation) Write(p []byte) (int, error) {
 		packet := make([]byte, 3, len(body)+3)
 		packet = append(packet, body...)
 		if _, err := c.relay.Write(packet); err != nil {
+			if c.monitor != nil {
+				c.monitor.genericUDPErrors.Add(1)
+			}
 			return len(p), err
+		}
+		if c.monitor != nil {
+			c.monitor.genericUDPUpDatagrams.Add(1)
+			c.monitor.genericUDPUpBytes.Add(uint64(len(payload)))
 		}
 	}
 	return len(p), nil
@@ -217,8 +231,13 @@ func (c *externalSOCKSUDPAssociation) Read(p []byte) (int, error) {
 			continue
 		}
 		body := buffer[3:n]
-		if _, _, _, _, err := udpframe.DecodeBody(body); err != nil {
+		_, _, _, payload, err := udpframe.DecodeBody(body)
+		if err != nil {
 			continue
+		}
+		if c.monitor != nil {
+			c.monitor.genericUDPDownDatagrams.Add(1)
+			c.monitor.genericUDPDownBytes.Add(uint64(len(payload)))
 		}
 		framed := make([]byte, 2, len(body)+2)
 		binary.BigEndian.PutUint16(framed, uint16(len(body)))
@@ -237,6 +256,9 @@ func (c *externalSOCKSUDPAssociation) Close() error {
 	c.closeOnce.Do(func() {
 		_ = c.relay.Close()
 		_ = c.control.Close()
+		if c.monitor != nil {
+			c.monitor.genericUDPActive.Add(^uint64(0))
+		}
 	})
 	return nil
 }

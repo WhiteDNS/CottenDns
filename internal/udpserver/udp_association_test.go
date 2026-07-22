@@ -6,6 +6,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"cottendns-go/internal/udpframe"
 )
 
 func TestReadSOCKS5BoundUDPAddress(t *testing.T) {
@@ -60,5 +62,30 @@ func TestUDPAssociationReadDeadlineIsTransient(t *testing.T) {
 	var netErr net.Error
 	if !errors.As(err, &netErr) || !netErr.Timeout() || !netErr.Temporary() {
 		t.Fatalf("expected transient network timeout, got %T %v", err, err)
+	}
+}
+
+func TestUDPAssociationMonitoringLifecycleAndErrors(t *testing.T) {
+	s := &Server{}
+	association := newUDPAssociationConn(s)
+	if s.genericUDPActive.Load() != 1 || s.genericUDPTotal.Load() != 1 {
+		t.Fatalf("association counters active=%d total=%d", s.genericUDPActive.Load(), s.genericUDPTotal.Load())
+	}
+
+	frame, err := udpframe.Encode(udpframe.AddressTypeIPv4, "127.0.0.1", 443, []byte("blocked"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := association.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	if s.genericUDPErrors.Load() != 1 {
+		t.Fatalf("generic UDP errors=%d want=1", s.genericUDPErrors.Load())
+	}
+	if err := association.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s.genericUDPActive.Load() != 0 {
+		t.Fatalf("generic UDP active=%d want=0", s.genericUDPActive.Load())
 	}
 }

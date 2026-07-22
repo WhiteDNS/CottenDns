@@ -268,7 +268,15 @@ journalctl -u cottendns -f
 systemctl restart cottendns
 systemctl stop cottendns
 curl http://127.0.0.1:9090/healthz
+curl 'http://127.0.0.1:9090/healthz?details=1' | jq
+curl http://127.0.0.1:9090/metrics
 ```
+
+The plain health URL stays compatible with liveness probes. The detailed JSON
+view provides a safe server-status and monitoring list; `/metrics` exposes the
+same counters and gauges in Prometheus format. Keep the monitoring listener on
+`127.0.0.1` unless access is protected by a firewall or authenticated reverse
+proxy.
 
 ### Docker installation
 

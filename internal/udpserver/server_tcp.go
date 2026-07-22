@@ -73,6 +73,8 @@ func (s *Server) serveTCP(ctx context.Context, host string, port int) error {
 	if err != nil {
 		return err
 	}
+	s.tcpListenerUp.Store(1)
+	defer s.tcpListenerUp.Store(0)
 	limited := newLimitedListenerWithBudget(ln, s.streamConnBudget, s.cfg.TCPMaxConns, s.cfg.TCPMaxConnsPerIP)
 	return s.serveDNSOverStream(ctx, limited, "TCP")
 }

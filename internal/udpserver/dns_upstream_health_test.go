@@ -2,13 +2,17 @@ package udpserver
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"cottendns-go/internal/config"
 )
 
 func TestOrderedDNSUpstreamsDeprioritizesRepeatedFailures(t *testing.T) {
@@ -81,8 +85,28 @@ func TestQueryOneUpstreamRetriesTruncatedUDPOverTCP(t *testing.T) {
 }
 
 func TestMetricsHandlerExposesHealthAndCounters(t *testing.T) {
-	s := &Server{sessions: &sessionStore{}}
+	s := &Server{
+		cfg: config.ServerConfig{
+			MaxConcurrentRequests: 64,
+			MaxPacketSize:         1024,
+			MaxIngressQueueBytes:  64 * 1024,
+			MaxActiveSessions:     2048,
+			MaxStreamsPerSession:  4096,
+			TCPMaxConns:           1024,
+			UDPReaders:            4,
+			DNSRequestWorkers:     8,
+			SocketBufferSize:      8 * 1024 * 1024,
+		},
+		sessions:           &sessionStore{},
+		startedAt:          time.Now().Add(-90 * time.Second),
+		dnsUpstreamHealth:  make(map[string]*dnsUpstreamHealthState),
+		externalSOCKS5User: []byte("must-not-leak"),
+	}
+	s.running.Store(true)
 	s.dnsUpstreamQueries.Store(7)
+	s.codecAccepted[3].Store(11)
+	s.genericUDPActive.Store(2)
+	s.genericUDPDownBytes.Store(4096)
 
 	health := httptest.NewRecorder()
 	s.MetricsHandler().ServeHTTP(health, httptest.NewRequest("GET", "/healthz", nil))
@@ -90,9 +114,46 @@ func TestMetricsHandlerExposesHealthAndCounters(t *testing.T) {
 		t.Fatalf("unexpected health response: %d %q", health.Code, health.Body.String())
 	}
 
+	detailed := httptest.NewRecorder()
+	s.MetricsHandler().ServeHTTP(detailed, httptest.NewRequest("GET", "/healthz?details=1", nil))
+	if detailed.Code != http.StatusOK {
+		t.Fatalf("unexpected detailed health status: %d", detailed.Code)
+	}
+	var snapshot healthResponse
+	if err := json.Unmarshal(detailed.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode detailed health: %v\n%s", err, detailed.Body.String())
+	}
+	if snapshot.Status != "ok" || snapshot.UptimeSeconds < 89 {
+		t.Fatalf("unexpected detailed status/uptime: %+v", snapshot)
+	}
+	if snapshot.Capacity.IngressControlQueueSlots+snapshot.Capacity.IngressDataQueueSlots != 64 {
+		t.Fatalf("unexpected ingress capacity: %+v", snapshot.Capacity)
+	}
+	foundQueries, foundCodec, foundUDP := false, false, false
+	for _, metric := range snapshot.Monitoring {
+		switch metric.Name {
+		case "dns_upstream_queries_total":
+			foundQueries = metric.Value == 7 && metric.Type == "counter"
+		case "ingress_codec_method_3_packets_total":
+			foundCodec = metric.Value == 11
+		case "generic_udp_downstream_bytes_total":
+			foundUDP = metric.Value == 4096 && metric.Type == "counter"
+		}
+	}
+	if !foundQueries || !foundCodec || !foundUDP {
+		t.Fatalf("detailed monitoring list missing counters: queries=%t codec=%t udp=%t", foundQueries, foundCodec, foundUDP)
+	}
+	if strings.Contains(detailed.Body.String(), "must-not-leak") {
+		t.Fatal("detailed health leaked a credential")
+	}
+
 	metrics := httptest.NewRecorder()
 	s.MetricsHandler().ServeHTTP(metrics, httptest.NewRequest("GET", "/metrics", nil))
 	if !strings.Contains(metrics.Body.String(), "cottendns_dns_upstream_queries_total 7") {
 		t.Fatalf("missing upstream counter: %s", metrics.Body.String())
+	}
+	if !strings.Contains(metrics.Body.String(), "# TYPE cottendns_dns_upstream_queries_total counter") ||
+		!strings.Contains(metrics.Body.String(), "cottendns_runtime_heap_alloc_bytes") {
+		t.Fatalf("missing metric type or runtime monitoring: %s", metrics.Body.String())
 	}
 }

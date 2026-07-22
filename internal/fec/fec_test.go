@@ -74,6 +74,39 @@ func TestSurvives75PercentLoss(t *testing.T) {
 	}
 }
 
+// Super-FEC's upper supported operating point is 84% loss (just below the
+// default 85% hopeless-link ceiling). Verify reconstruction with actual shards,
+// not only the server's parity-selection arithmetic.
+func TestSurvives84PercentLoss(t *testing.T) {
+	for _, dataShards := range []int{1, 2, 4, 8} {
+		parity := ParityForLoss(dataShards, 0.84)
+		pkts := samplePackets(dataShards)
+		block, err := EncodePackets(pkts, parity)
+		if err != nil {
+			t.Fatalf("EncodePackets(N=%d,K=%d): %v", dataShards, parity, err)
+		}
+
+		total := dataShards + parity
+		drop := int(float64(total) * 0.84)
+		if total-drop < dataShards {
+			t.Fatalf("N=%d parity=%d leaves only %d shards", dataShards, parity, total-drop)
+		}
+		for i := 0; i < drop; i++ {
+			block.Shards[i] = nil
+		}
+
+		got, err := DecodePackets(block)
+		if err != nil {
+			t.Fatalf("N=%d parity=%d after 84%% loss: DecodePackets: %v", dataShards, parity, err)
+		}
+		for i := range pkts {
+			if !bytes.Equal(got[i], pkts[i]) {
+				t.Fatalf("N=%d packet %d mismatch after 84%% loss", dataShards, i)
+			}
+		}
+	}
+}
+
 func TestReorderAndPartialLossReconstructs(t *testing.T) {
 	pkts := samplePackets(6)
 	parity := 6

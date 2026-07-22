@@ -1024,6 +1024,68 @@ The Android full-VPN integration was updated alongside the protocol:
 
 ---
 
+## 23. Safe server health monitoring
+
+The optional metrics listener now provides a detailed JSON monitoring snapshot
+at `/healthz?details=1` (also `/healthz/details` or an
+`Accept: application/json` request). Plain `/healthz` still returns exactly
+`ok` so Docker, systemd, load balancers, and older monitoring scripts remain
+compatible.
+
+The snapshot contains the build version and uptime; Go runtime/memory state;
+safe configured capacity; active transport state; aggregate DNS-upstream
+health; current queue-pressure warnings; and a typed monitoring list covering
+sessions, streams, ingress, deferred work, connection budgets, DNS resolution,
+codec acceptance, UDP/TCP/DoT/DoH listener state, generic-UDP association and
+payload-byte totals, rejection/recovery counters, and runtime memory. The
+Prometheus `/metrics` endpoint uses the same list, including proper
+counter/gauge types, so the JSON and time-series views cannot silently drift.
+
+Monitoring is deliberately outside the tunnel data path and applies no user
+rate limit. Snapshots use atomic counters, short read-only locks, and channel
+length reads. Neither endpoint exposes encryption keys, credentials, client
+addresses, queried domains, UDP destinations, or payload data. Responses are
+marked `no-store`, and the metrics HTTP server has bounded headers and idle
+timeouts.
+
+---
+
+## 24. Generic-UDP isolation and 84% loss validation
+
+Generic UDP setup is now isolated from the optimized DNS/53 path. Previously,
+the first non-DNS datagram could block the SOCKS UDP receive loop while the
+generic stream waited for its server acknowledgement. An old server rejecting
+the marker, a blocked generic association, or a severely lost setup response
+could therefore delay unrelated DNS requests using the same local association.
+
+A dedicated generic-UDP writer now owns setup, stream writes, and bounded
+exponential retry (250 ms through 10 seconds). The SOCKS receive loop only makes
+a non-blocking insertion into a 256-datagram burst queue and immediately returns
+to DNS work. A full queue replaces its oldest unsent datagram, and a failed
+retry drains to the newest available datagram, preventing obsolete real-time
+traffic from accumulating latency. This is not a bandwidth limiter: the writer
+uses all available tunnel capacity whenever it can drain. A 60-second write
+stall guard recycles a genuinely wedged association, while cancellation closes
+the active stream immediately.
+
+This fallback has an exact compatibility boundary: DNS/53 continues through
+the old cache-aware UDP path even when generic UDP is unavailable. Arbitrary
+non-DNS UDP cannot be converted into a DNS-only request without corrupting its
+application semantics, so it is retried on a fresh generic stream instead. The
+stream still inherits the configured DNS-carrier chain, including automatic
+UDP-to-TCP/53 carrier fallback when `RESOLVER_TRANSPORT = "auto"`.
+
+Extreme-loss coverage now validates the actual Reed-Solomon encode/decode path
+after deterministically removing 84% of shards for block sizes 1, 2, 4, and 8.
+Server Super-FEC already scales parity through the 75%-85% operating band, and
+the client duplication test now explicitly covers the 84% survival ceiling.
+ARQ remains the eventual-delivery backstop on both directions. No implementation
+can preserve normal throughput when only 16% of packets survive, but the client
+and server now have tested recovery behavior at that operating point rather
+than merely accepting it as a configuration value.
+
+---
+
 *All changes keep ARQ as the correctness backstop; every optimization above is
 designed to fail safe — if FEC, MTU grouping, a carrier, or a transport channel
 does not help on a given path, the tunnel still delivers through the surviving

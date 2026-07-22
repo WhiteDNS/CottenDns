@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"sync"
 	"time"
 
 	"cottendns-go/internal/arq"
@@ -630,21 +631,13 @@ func (c *Client) handleSocksUDPAssociate(ctx context.Context, conn net.Conn, cli
 		}
 	}()
 
-	var genericAppConn net.Conn
-	var genericStreamID uint16
-	defer func() {
-		if genericAppConn != nil {
-			_ = genericAppConn.Close()
-		}
-		if genericStreamID != 0 {
-			c.CloseStream(genericStreamID, true, 0)
-		}
-	}()
+	type genericAssociationHandle struct {
+		conn     net.Conn
+		streamID uint16
+	}
+	var associationPeer *net.UDPAddr
 
-	startGenericAssociation := func(peerAddr *net.UDPAddr) (net.Conn, error) {
-		if genericAppConn != nil {
-			return genericAppConn, nil
-		}
+	startGenericAssociation := func(peerAddr *net.UDPAddr) (*genericAssociationHandle, error) {
 		streamID, ok := c.get_new_stream_id()
 		if !ok {
 			return nil, errors.New("no free stream ID for UDP association")
@@ -670,15 +663,109 @@ func (c *Client) handleSocksUDPAssociate(ctx context.Context, conn net.Conn, cli
 			Enums.DefaultPacketPriority(Enums.PACKET_SOCKS5_SYN),
 			true, nil, 120*time.Second,
 		)
-		genericAppConn = appConn
-		genericStreamID = streamID
 		go c.relayGenericUDPResponses(appConn, udpConn, peerAddr)
 		c.log.Infof("📡 <green>Generic SOCKS5 UDP association started, Stream ID: <cyan>%d</cyan></green>", streamID)
-		return genericAppConn, nil
+		return &genericAssociationHandle{conn: appConn, streamID: streamID}, nil
 	}
 
+	// Generic UDP setup and backpressure must never block the established SOCKS
+	// UDP socket from serving its optimized DNS/53 path. This worker owns stream
+	// retries while the receive loop only performs a non-blocking queue insert.
+	// An old server can reject the reserved marker and DNS will still flow.
+	genericCtx, genericCancel := context.WithCancel(ctx)
+	genericFrames := make(chan []byte, genericUDPFrameQueueCapacity)
+	genericDone := make(chan struct{})
+	var genericActiveMu sync.Mutex
+	var genericActive *genericAssociationHandle
+	setGenericActive := func(active *genericAssociationHandle) bool {
+		genericActiveMu.Lock()
+		defer genericActiveMu.Unlock()
+		if genericCtx.Err() != nil {
+			_ = active.conn.Close()
+			c.CloseStream(active.streamID, true, 0)
+			return false
+		}
+		genericActive = active
+		return true
+	}
+	clearGenericActive := func(active *genericAssociationHandle) {
+		genericActiveMu.Lock()
+		if genericActive == active {
+			genericActive = nil
+		}
+		genericActiveMu.Unlock()
+	}
+	closeGeneric := func(active *genericAssociationHandle) {
+		if active == nil {
+			return
+		}
+		clearGenericActive(active)
+		_ = active.conn.Close()
+		c.CloseStream(active.streamID, true, 0)
+	}
+	go func() {
+		defer close(genericDone)
+		var active *genericAssociationHandle
+		defer func() { closeGeneric(active) }()
+		retryDelay := genericUDPRetryMinDelay
+		for {
+			var frame []byte
+			select {
+			case <-genericCtx.Done():
+				return
+			case frame = <-genericFrames:
+			}
+
+			for len(frame) > 0 {
+				if active == nil {
+					started, startErr := startGenericAssociation(associationPeer)
+					if startErr != nil {
+						c.log.Warnf("Unable to start generic UDP association: %v; legacy DNS remains active", startErr)
+						if !waitGenericUDPRetry(genericCtx, retryDelay) {
+							return
+						}
+						frame = latestGenericUDPFrame(genericFrames, frame)
+						retryDelay = nextGenericUDPRetryDelay(retryDelay)
+						continue
+					}
+					active = started
+					if !setGenericActive(active) {
+						active = nil
+						return
+					}
+				}
+
+				_ = active.conn.SetWriteDeadline(time.Now().Add(genericUDPWriteStallTimeout))
+				_, writeErr := active.conn.Write(frame)
+				_ = active.conn.SetWriteDeadline(time.Time{})
+				if writeErr == nil {
+					frame = nil
+					retryDelay = genericUDPRetryMinDelay
+					continue
+				}
+
+				c.log.Warnf("Generic UDP association failed: %v; retrying while legacy DNS remains active", writeErr)
+				closeGeneric(active)
+				active = nil
+				if !waitGenericUDPRetry(genericCtx, retryDelay) {
+					return
+				}
+				frame = latestGenericUDPFrame(genericFrames, frame)
+				retryDelay = nextGenericUDPRetryDelay(retryDelay)
+			}
+		}
+	}()
+	defer func() {
+		genericCancel()
+		genericActiveMu.Lock()
+		if genericActive != nil {
+			_ = genericActive.conn.Close()
+		}
+		genericActiveMu.Unlock()
+		<-genericDone
+	}()
+
 	buf := make([]byte, 65535)
-	var associationPeer *net.UDPAddr
 	for {
 		_ = udpConn.SetReadDeadline(time.Now().Add(c.cfg.SOCKSUDPAssociateReadTimeout()))
 		n, peerAddr, err := udpConn.ReadFromUDP(buf)
@@ -745,14 +832,7 @@ func (c *Client) handleSocksUDPAssociate(ctx context.Context, conn net.Conn, cli
 			if frameErr != nil {
 				continue
 			}
-			appConn, startErr := startGenericAssociation(associationPeer)
-			if startErr != nil {
-				c.log.Warnf("⚠️ <yellow>Unable to start generic UDP association: %v</yellow>", startErr)
-				return
-			}
-			if _, writeErr := appConn.Write(frame); writeErr != nil {
-				return
-			}
+			enqueueLatestGenericUDPFrame(genericFrames, frame)
 			continue
 		}
 

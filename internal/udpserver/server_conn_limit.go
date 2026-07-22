@@ -203,6 +203,16 @@ func (b *connectionBudget) release() {
 	b.parent.release()
 }
 
+func (b *connectionBudget) snapshot() (active int, limit int) {
+	if b == nil {
+		return 0, 0
+	}
+	b.mu.Lock()
+	active, limit = b.active, b.max
+	b.mu.Unlock()
+	return active, limit
+}
+
 func (c *limitedConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(func() { c.listener.release(c.ip) })

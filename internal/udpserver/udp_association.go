@@ -36,15 +36,24 @@ type udpAssociationConn struct {
 	rx           chan []byte
 	closed       chan struct{}
 	closeOnce    sync.Once
+	monitor      *Server
 }
 
-func newUDPAssociationConn() *udpAssociationConn {
-	return &udpAssociationConn{
+func newUDPAssociationConn(monitors ...*Server) *udpAssociationConn {
+	c := &udpAssociationConn{
 		endpoints: make(map[string]*udpAssociationEndpoint),
 		aliases:   make(map[string]string),
 		rx:        make(chan []byte, 64),
 		closed:    make(chan struct{}),
 	}
+	if len(monitors) > 0 {
+		c.monitor = monitors[0]
+	}
+	if c.monitor != nil {
+		c.monitor.genericUDPActive.Add(1)
+		c.monitor.genericUDPTotal.Add(1)
+	}
+	return c
 }
 
 func (c *udpAssociationConn) Write(p []byte) (int, error) {
@@ -83,13 +92,23 @@ func (c *udpAssociationConn) Write(p []byte) (int, error) {
 		}
 		endpoint, err := c.endpointFor(host, port)
 		if err != nil {
+			if c.monitor != nil {
+				c.monitor.genericUDPErrors.Add(1)
+			}
 			continue
 		}
 		if _, err := endpoint.conn.Write(payload); err == nil {
+			if c.monitor != nil {
+				c.monitor.genericUDPUpDatagrams.Add(1)
+				c.monitor.genericUDPUpBytes.Add(uint64(len(payload)))
+			}
 			c.mu.Lock()
 			endpoint.lastUsed = time.Now()
 			c.mu.Unlock()
 		} else {
+			if c.monitor != nil {
+				c.monitor.genericUDPErrors.Add(1)
+			}
 			c.removeEndpoint(endpoint)
 		}
 	}
@@ -143,6 +162,9 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 		c.removeAliasesLocked(oldestKey)
 		if oldest != nil {
 			_ = oldest.conn.Close()
+			if c.monitor != nil {
+				c.monitor.genericUDPEndpoints.Add(^uint64(0))
+			}
 		}
 	}
 	c.mu.Unlock()
@@ -166,6 +188,9 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	}
 	c.endpoints[key] = endpoint
 	c.aliases[requestKey] = key
+	if c.monitor != nil {
+		c.monitor.genericUDPEndpoints.Add(1)
+	}
 	c.mu.Unlock()
 	go c.readEndpoint(endpoint)
 	return endpoint, nil
@@ -184,14 +209,19 @@ func (c *udpAssociationConn) removeEndpoint(target *udpAssociationEndpoint) {
 		return
 	}
 	c.mu.Lock()
+	removed := false
 	for endpointKey, endpoint := range c.endpoints {
 		if endpoint == target {
 			delete(c.endpoints, endpointKey)
 			c.removeAliasesLocked(endpointKey)
+			removed = true
 			break
 		}
 	}
 	c.mu.Unlock()
+	if removed && c.monitor != nil {
+		c.monitor.genericUDPEndpoints.Add(^uint64(0))
+	}
 	_ = target.conn.Close()
 }
 
@@ -235,6 +265,10 @@ func (c *udpAssociationConn) readEndpoint(endpoint *udpAssociationEndpoint) {
 		frame, err := udpframe.Encode(atyp, remote.IP.String(), uint16(remote.Port), buffer[:n])
 		if err != nil {
 			continue
+		}
+		if c.monitor != nil {
+			c.monitor.genericUDPDownDatagrams.Add(1)
+			c.monitor.genericUDPDownBytes.Add(uint64(n))
 		}
 		select {
 		case c.rx <- frame:
@@ -300,9 +334,15 @@ func (c *udpAssociationConn) Close() error {
 		for key, endpoint := range c.endpoints {
 			_ = endpoint.conn.Close()
 			delete(c.endpoints, key)
+			if c.monitor != nil {
+				c.monitor.genericUDPEndpoints.Add(^uint64(0))
+			}
 		}
 		clear(c.aliases)
 		c.mu.Unlock()
+		if c.monitor != nil {
+			c.monitor.genericUDPActive.Add(^uint64(0))
+		}
 	})
 	return nil
 }

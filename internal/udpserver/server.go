@@ -115,6 +115,7 @@ type Server struct {
 	dnsUpstreamTCPFallbacks atomic.Uint64
 	streamConnBudget        *connectionBudget
 	encryptedConnBudget     *connectionBudget
+	tcpListenerUp           atomic.Uint64
 	dotListenerUp           atomic.Uint64
 	dohListenerUp           atomic.Uint64
 	tlsHandshakeFailures    atomic.Uint64
@@ -122,6 +123,16 @@ type Server struct {
 	dohRequestRejected      atomic.Uint64
 	sniPassthroughActive    atomic.Uint64
 	sniPassthroughFailures  atomic.Uint64
+	genericUDPActive        atomic.Uint64
+	genericUDPTotal         atomic.Uint64
+	genericUDPEndpoints     atomic.Uint64
+	genericUDPUpDatagrams   atomic.Uint64
+	genericUDPUpBytes       atomic.Uint64
+	genericUDPDownDatagrams atomic.Uint64
+	genericUDPDownBytes     atomic.Uint64
+	genericUDPErrors        atomic.Uint64
+	startedAt               time.Time
+	running                 atomic.Bool
 
 	// clientPolicy is the ceiling set advertised to clients in SESSION_ACCEPT.
 	// Resolved once at construction because it never changes at runtime. A zero
@@ -180,6 +191,7 @@ type Stats struct {
 	DNSUpstreamFailures     uint64
 	DNSUpstreamHedges       uint64
 	DNSUpstreamTCPFallbacks uint64
+	TCPListenerUp           uint64
 	DoTListenerUp           uint64
 	DoHListenerUp           uint64
 	TLSHandshakeFailures    uint64
@@ -187,6 +199,25 @@ type Stats struct {
 	DoHRequestRejected      uint64
 	SNIPassthroughActive    uint64
 	SNIPassthroughFailures  uint64
+	IngressControlCapacity  uint64
+	IngressDataCapacity     uint64
+	DeferredDNSPending      uint64
+	DeferredDNSCapacity     uint64
+	DeferredConnectPending  uint64
+	DeferredConnectCapacity uint64
+	StreamConnectionsActive uint64
+	StreamConnectionsLimit  uint64
+	EncryptedConnsActive    uint64
+	EncryptedConnsLimit     uint64
+	CodecAcceptedPackets    [6]uint64
+	GenericUDPActive        uint64
+	GenericUDPTotal         uint64
+	GenericUDPEndpoints     uint64
+	GenericUDPUpDatagrams   uint64
+	GenericUDPUpBytes       uint64
+	GenericUDPDownDatagrams uint64
+	GenericUDPDownBytes     uint64
+	GenericUDPErrors        uint64
 }
 
 // Stats returns a consistent snapshot of the server's observability counters.
@@ -202,6 +233,21 @@ func (s *Server) Stats() Stats {
 		fragmentConflicts += s.socks5Fragments.ConflictCount()
 	}
 	activeSessions, nativeSessions, legacySessions, activeStreams := s.sessions.operationalCounts()
+	var controlCapacity, dataCapacity int
+	// Preserve the documented zero-value Stats contract for unconfigured test
+	// and embedding instances. Loaded production config always normalizes these
+	// fields above zero before New constructs the server.
+	if s.cfg.MaxConcurrentRequests > 0 && s.cfg.MaxPacketSize > 0 && s.cfg.MaxIngressQueueBytes > 0 {
+		controlCapacity, dataCapacity = s.ingressQueueCapacities()
+	}
+	dnsPending, dnsCapacity := s.deferredDNSSession.snapshot()
+	connectPending, connectCapacity := s.deferredConnectSession.snapshot()
+	streamConnectionsActive, streamConnectionsLimit := s.streamConnBudget.snapshot()
+	encryptedConnsActive, encryptedConnsLimit := s.encryptedConnBudget.snapshot()
+	var codecAccepted [6]uint64
+	for method := range codecAccepted {
+		codecAccepted[method] = s.codecAccepted[method].Load()
+	}
 	return Stats{
 		DroppedPackets:          s.droppedPackets.Load(),
 		IngressRejectedPackets:  s.ingressRejectedPackets.Load(),
@@ -229,6 +275,7 @@ func (s *Server) Stats() Stats {
 		DNSUpstreamFailures:     s.dnsUpstreamFailures.Load(),
 		DNSUpstreamHedges:       s.dnsUpstreamHedges.Load(),
 		DNSUpstreamTCPFallbacks: s.dnsUpstreamTCPFallbacks.Load(),
+		TCPListenerUp:           s.tcpListenerUp.Load(),
 		DoTListenerUp:           s.dotListenerUp.Load(),
 		DoHListenerUp:           s.dohListenerUp.Load(),
 		TLSHandshakeFailures:    s.tlsHandshakeFailures.Load(),
@@ -236,6 +283,25 @@ func (s *Server) Stats() Stats {
 		DoHRequestRejected:      s.dohRequestRejected.Load(),
 		SNIPassthroughActive:    s.sniPassthroughActive.Load(),
 		SNIPassthroughFailures:  s.sniPassthroughFailures.Load(),
+		IngressControlCapacity:  uint64(max(controlCapacity, 0)),
+		IngressDataCapacity:     uint64(max(dataCapacity, 0)),
+		DeferredDNSPending:      uint64(max(dnsPending, 0)),
+		DeferredDNSCapacity:     uint64(max(dnsCapacity, 0)),
+		DeferredConnectPending:  uint64(max(connectPending, 0)),
+		DeferredConnectCapacity: uint64(max(connectCapacity, 0)),
+		StreamConnectionsActive: uint64(max(streamConnectionsActive, 0)),
+		StreamConnectionsLimit:  uint64(max(streamConnectionsLimit, 0)),
+		EncryptedConnsActive:    uint64(max(encryptedConnsActive, 0)),
+		EncryptedConnsLimit:     uint64(max(encryptedConnsLimit, 0)),
+		CodecAcceptedPackets:    codecAccepted,
+		GenericUDPActive:        s.genericUDPActive.Load(),
+		GenericUDPTotal:         s.genericUDPTotal.Load(),
+		GenericUDPEndpoints:     s.genericUDPEndpoints.Load(),
+		GenericUDPUpDatagrams:   s.genericUDPUpDatagrams.Load(),
+		GenericUDPUpBytes:       s.genericUDPUpBytes.Load(),
+		GenericUDPDownDatagrams: s.genericUDPDownDatagrams.Load(),
+		GenericUDPDownBytes:     s.genericUDPDownBytes.Load(),
+		GenericUDPErrors:        s.genericUDPErrors.Load(),
 	}
 }
 
@@ -333,6 +399,7 @@ func New(cfg config.ServerConfig, log *logger.Logger, codec *security.Codec) *Se
 			},
 		},
 		deferredInflight: make(map[uint64]struct{}, 128),
+		startedAt:        time.Now(),
 		streamConnBudget: streamBudget,
 		// DoT/DoH draw from a capped sub-share so that flooding the optional
 		// encrypted listeners can never consume the connection headroom the
@@ -508,6 +575,8 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.running.Store(true)
+	defer s.running.Store(false)
 
 	defer func() {
 		for _, conn := range conns {
@@ -530,14 +599,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cfg.MaxIngressQueueBytes,
 	)
 
-	controlCapacity := queueCapacity / 8
-	if queueCapacity >= 128 {
-		controlCapacity = max(controlCapacity, 64)
-	}
-	if controlCapacity >= queueCapacity && queueCapacity > 1 {
-		controlCapacity = queueCapacity - 1
-	}
-	dataCapacity := queueCapacity - controlCapacity
+	controlCapacity, dataCapacity := s.ingressQueueCapacities()
 	queues := ingressQueues{
 		control: make(chan request, controlCapacity),
 		data:    make(chan request, dataCapacity),

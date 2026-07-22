@@ -22,6 +22,7 @@ func TestDuplicationForLoss(t *testing.T) {
 		{"30% loss -> 3 copies", 1, 0.30, 3},
 		{"50% loss -> 5 copies", 1, 0.50, 5},
 		{"75% loss exceeds ceiling -> 8", 1, 0.75, 8},
+		{"84% loss uses survival ceiling", 1, 0.84, 8},
 		{"base higher than computed wins", 4, 0.10, 4},
 		{"computed never below base", 6, 0.30, 6},
 	}

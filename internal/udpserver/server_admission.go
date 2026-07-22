@@ -35,6 +35,25 @@ func (s *Server) ingressQueueCapacity() int {
 	return requestLimit
 }
 
+// ingressQueueCapacities returns the exact work-conserving control/data split
+// used by Run. Keeping this calculation available outside Run lets monitoring
+// report configured capacity without retaining queue references or touching
+// the data-plane hot path.
+func (s *Server) ingressQueueCapacities() (control int, data int) {
+	if s == nil {
+		return 0, 0
+	}
+	total := s.ingressQueueCapacity()
+	control = total / 8
+	if total >= 128 {
+		control = max(control, 64)
+	}
+	if control >= total && total > 1 {
+		control = total - 1
+	}
+	return control, total - control
+}
+
 // admitIngressPacket performs only the cheap DNS/domain checks and tunnel frame
 // decryption/header validation needed to decide whether a UDP datagram deserves
 // scarce queue space. Payload decompression and all session work stay on bounded

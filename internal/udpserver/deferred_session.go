@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -115,6 +115,20 @@ func (p *deferredSessionProcessor) Start(ctx context.Context) {
 	for idx := range p.workers {
 		go p.runDeferredWorker(ctx, idx)
 	}
+}
+
+// snapshot reports queued/running work and total bounded capacity. It only
+// reads atomics and channel lengths, so health polling cannot contend with the
+// deferred-session scheduler.
+func (p *deferredSessionProcessor) snapshot() (pending int, capacity int) {
+	if p == nil {
+		return 0, 0
+	}
+	for i := range p.workers {
+		pending += int(p.workers[i].pending.Load())
+		capacity += cap(p.workers[i].jobs) + 1 // one running task per worker
+	}
+	return pending, capacity
 }
 
 func (p *deferredSessionProcessor) Enqueue(lane deferredSessionLane, run func(context.Context)) bool {
