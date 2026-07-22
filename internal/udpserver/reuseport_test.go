@@ -64,9 +64,10 @@ func freeUDPPort(t *testing.T) int {
 	return port
 }
 
-// listenUDP must hand back one socket per reader where SO_REUSEPORT exists and
-// exactly one shared socket where it does not -- never a partial set, since a
-// short set would leave some readers contending while others run free.
+// listenUDP must hand back the calculated socket count where SO_REUSEPORT
+// exists and exactly one shared socket where it does not. The calculated count
+// deliberately keeps multiple readers on each socket and caps queues at the
+// available CPU count.
 func TestListenUDPSocketCountMatchesPlatform(t *testing.T) {
 	const readers = 4
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: freeUDPPort(t)}
@@ -84,7 +85,7 @@ func TestListenUDPSocketCountMatchesPlatform(t *testing.T) {
 
 	want := 1
 	if reusePortSupported {
-		want = readers
+		want = udpSocketCount(readers)
 	}
 	if len(conns) != want {
 		t.Fatalf("socket count = %d, want %d (reusePortSupported=%v)", len(conns), want, reusePortSupported)
