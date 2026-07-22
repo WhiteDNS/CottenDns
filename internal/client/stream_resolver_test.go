@@ -313,6 +313,17 @@ func TestRuntimePacketDuplicationCountUsesDirectionalValues(t *testing.T) {
 	}
 }
 
+func TestRuntimePacketDuplicationCoordinatesWithRecentFEC(t *testing.T) {
+	c := buildTestClientWithResolvers(config.ClientConfig{
+		UploadPacketDuplicationCount:   1,
+		DownloadPacketDuplicationCount: 6,
+	}, "a", "b", "c", "d", "e", "f")
+	c.lastFECReceived.Store(c.now().UnixNano())
+	if got := c.runtimePacketDuplicationCount(Enums.PACKET_STREAM_DATA_ACK); got != 2 {
+		t.Fatalf("download duplication with active FEC = %d, want 2", got)
+	}
+}
+
 func TestServerPolicyCapsDataAndSetupDuplication(t *testing.T) {
 	c := &Client{cfg: config.ClientConfig{
 		UploadPacketDuplicationCount:        6,
