@@ -118,8 +118,20 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Client startup failed: %v\n", err)
-		waitForExitInput()
+		if !*scanOnly {
+			waitForExitInput()
+		}
 		os.Exit(1)
+	}
+
+	if *scanOnly {
+		sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if _, err := app.RunResolverScan(sigCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "Resolver scan failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	app.PrintBanner()
@@ -134,16 +146,6 @@ func main() {
 	// Wait for termination signal
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	if *scanOnly {
-		if _, err := app.RunResolverScan(sigCtx); err != nil {
-			if log != nil {
-				log.Errorf("Resolver scan error: %v", err)
-			}
-			os.Exit(1)
-		}
-		return
-	}
 
 	if err := app.Run(sigCtx); err != nil {
 		if log != nil {
