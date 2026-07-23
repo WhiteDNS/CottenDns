@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build from the engine module root regardless of the caller's working
+# directory. CI invokes this script by path from the Android workspace root, so
+# `go build ./cmd/client` must not depend on the caller having cd'd here first.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODULE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${MODULE_ROOT}"
+
 : "${NDK_ROOT:?Set NDK_ROOT to the installed Android NDK directory}"
 
 ANDROID_API="${ANDROID_API:-26}"
