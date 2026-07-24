@@ -156,6 +156,11 @@ type Client struct {
 	transportRecoveryPending atomic.Bool
 	lastTransportRecovery    atomic.Int64
 	transportRecoveryCount   atomic.Uint64
+	// transportRecoveryStreak counts consecutive transport-recovery requests with
+	// no tunnel response in between. A single transient loss stays a lightweight
+	// session restart; only a sustained streak escalates to a full MTU re-probe.
+	// Reset by recordTunnelResponse the moment traffic flows again.
+	transportRecoveryStreak atomic.Int32
 	// scanTelemetryActive makes the MTU probe path emit a WD_SCAN valid/rejected
 	// line the instant each resolver is decided, so the UI's Valid/Rejected
 	// counters advance in real time during a -scan-only run instead of only after

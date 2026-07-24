@@ -10,13 +10,26 @@ import (
 func TestRequestTransportRecoveryArmsFullRescanForExplicitTransport(t *testing.T) {
 	c := &Client{
 		cfg:                config.ClientConfig{ResolverTransport: "udp"},
-		sessionResetSignal: make(chan struct{}, 1),
+		sessionResetSignal: make(chan struct{}, transportRecoveryEscalateThreshold),
 		successMTUChecks:   true,
 		connections:        []Connection{{Key: "a", IsValid: true, UploadMTUBytes: 100, DownloadMTUBytes: 1000}},
 	}
-	c.requestTransportRecovery("test outage")
+	// Transient requests stay lightweight session restarts and must not wipe MTU
+	// state; only a sustained streak escalates to the full re-probe.
+	for i := 1; i < transportRecoveryEscalateThreshold; i++ {
+		c.requestTransportRecovery("transient blip")
+		if c.transportRecoveryPending.Load() {
+			t.Fatalf("request %d must not arm a full rescan", i)
+		}
+		select {
+		case <-c.sessionResetSignal:
+		default:
+		}
+		c.clearRuntimeResetRequest()
+	}
+	c.requestTransportRecovery("persistent outage")
 	if !c.transportRecoveryPending.Load() {
-		t.Fatal("path recovery was not armed")
+		t.Fatal("path recovery was not armed after a persistent streak")
 	}
 	select {
 	case <-c.sessionResetSignal:
@@ -27,7 +40,7 @@ func TestRequestTransportRecoveryArmsFullRescanForExplicitTransport(t *testing.T
 		t.Fatal("pending recovery was not activated")
 	}
 	if c.successMTUChecks {
-		t.Fatal("MTU discovery must be repeated after a live path outage")
+		t.Fatal("MTU discovery must be repeated after a persistent path outage")
 	}
 }
 
@@ -36,12 +49,19 @@ func TestRequestTransportRecoveryIsRateLimited(t *testing.T) {
 	c := &Client{
 		cfg:                config.ClientConfig{ResolverTransport: "auto"},
 		nowFn:              func() time.Time { return now },
-		sessionResetSignal: make(chan struct{}, 2),
+		sessionResetSignal: make(chan struct{}, transportRecoveryEscalateThreshold*2),
 	}
-	c.requestTransportRecovery("first")
+	// Drive a full streak to arm exactly one fleet rescan.
+	reachThreshold := func() {
+		for i := 0; i < transportRecoveryEscalateThreshold; i++ {
+			c.requestTransportRecovery("outage")
+			c.clearRuntimeResetRequest()
+		}
+	}
+	reachThreshold()
 	c.transportRecoveryPending.Store(false)
-	c.clearRuntimeResetRequest()
-	c.requestTransportRecovery("second")
+	// A second streak inside the cooldown must not arm a second rescan.
+	reachThreshold()
 	if got := c.transportRecoveryCount.Load(); got != 1 {
 		t.Fatalf("recovery count = %d, want one fleet rescan inside cooldown", got)
 	}

@@ -69,22 +69,31 @@ func (c *Client) recordTunnelResponse(now time.Time) {
 		now = c.now()
 	}
 	c.lastTunnelResponseUnix.Store(now.UnixNano())
+	// A live tunnel response means the path is healthy again: cancel any
+	// in-progress recovery escalation so a later, unrelated blip starts fresh with
+	// a lightweight session restart instead of a full re-probe. See
+	// requestTransportRecovery.
+	if c.transportRecoveryStreak.Load() != 0 {
+		c.transportRecoveryStreak.Store(0)
+	}
 }
 
 // shouldAdmitNewLocalStream reports whether a new local SOCKS/TCP stream should
 // be accepted right now, and if not, a short human reason for the log.
+//
+// It refuses a stream only on the hard concurrency cap or when the tunnel is
+// *persistently* dead (sends going unanswered past the stall window). A
+// transiently not-ready tunnel — the session re-initializing after a blip, or the
+// resolver pool momentarily empty mid-recovery — is NOT refused: the stream is
+// created and its SYN waits for the tunnel to return, matching the behavior before
+// admission control existed. Refusing on those transient states turned brief
+// reconnects into user-visible "connection refused".
 func (c *Client) shouldAdmitNewLocalStream(now time.Time) (bool, string) {
 	if c == nil {
 		return false, "client unavailable"
 	}
 	if now.IsZero() {
 		now = c.now()
-	}
-	if !c.SessionReady() {
-		return false, "session is not ready"
-	}
-	if c.balancer == nil || c.balancer.ValidCount() <= 0 {
-		return false, "no active resolvers"
 	}
 	if c.cfg.MaxActiveStreams > 0 {
 		activeStreams := c.activeLocalStreamCount()
@@ -145,12 +154,6 @@ func (c *Client) streamAdmissionNoResponseWindow() time.Duration {
 		return streamAdmissionMaxNoResponseWindow
 	}
 	return window
-}
-
-// streamSetupTTL bounds how long a newly admitted stream may sit in setup before
-// it is abandoned; it tracks the same window used to judge tunnel stalls.
-func (c *Client) streamSetupTTL() time.Duration {
-	return c.streamAdmissionNoResponseWindow()
 }
 
 // logNewStreamRejected logs an admission rejection, rate-limited so a burst of
